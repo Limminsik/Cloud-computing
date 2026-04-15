@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model ResearchSession {
+  id                String   @id @default(cuid())
+  query             String
+  searchTerms       String[]
+  inclusionCriteria String[]
+  exclusionCriteria String[]
+  status            String   @default("pending") // pending | running | done | error
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  papers            Paper[]
+  report            Report?
+  prismaStats       Json?
+}
+
+model Paper {
+  id            String          @id @default(cuid())
+  sessionId     String
+  title         String
+  authors       String[]
+  year          Int?
+  url           String?
+  abstract      String?
+  venue         String?
+  prismaStage   String          // identified | screened | eligible | included
+  decision      String?         // INCLUDE | EXCLUDE
+  reason        String?
+  extractedData Json?
+  session       ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model Report {
+  id        String          @id @default(cuid())
+  sessionId String          @unique
+  content   String
+  createdAt DateTime        @default(now())
+  session   ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
