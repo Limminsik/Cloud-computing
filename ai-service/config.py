@@ -8,7 +8,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 NESTJS_CALLBACK_URL = os.getenv("NESTJS_CALLBACK_URL", "http://localhost:4000")
 
-SEARCH_MODEL = "gemini-2.0-flash"
+SEARCH_MODEL = "gemini-2.5-flash-lite"
 REVIEW_MODEL = "claude-sonnet-4-6"
 
 PAPERS_DIR = Path(__file__).parent / "papers"

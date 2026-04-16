@@ -41,8 +41,8 @@ export class ResearchService {
         }),
       );
       this.logger.log(`Pipeline started for session ${session.id}`);
-    } catch (err) {
-      this.logger.error(`Failed to start pipeline: ${err.message}`);
+    } catch (err: unknown) {
+      this.logger.error(`Failed to start pipeline: ${err instanceof Error ? err.message : String(err)}`);
       // Mark session as error but still return sessionId so frontend can track
       await this.prisma.researchSession.update({
         where: { id: session.id },
@@ -77,6 +77,20 @@ export class ResearchService {
         prismaStats: true,
       },
     });
+  }
+
+  async runStage(id: string, stage: 'screening' | 'eligibility' | 'inclusion', criteria: string[]) {
+    const session = await this.prisma.researchSession.findUnique({ where: { id } });
+    if (!session) throw new NotFoundException(`Session ${id} not found`);
+
+    const aiServiceUrl = this.config.get<string>('AI_SERVICE_URL', 'http://localhost:8000');
+    await firstValueFrom(
+      this.httpService.post(`${aiServiceUrl}/pipeline/${stage}`, {
+        session_id: id,
+        criteria,
+      }),
+    );
+    return { status: 'started', stage };
   }
 
   async completeSession(id: string, dto: CompleteSessionDto) {

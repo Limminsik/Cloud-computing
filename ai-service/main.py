@@ -2,9 +2,7 @@
 
 import asyncio
 import json
-import uuid
 from contextlib import asynccontextmanager
-from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -14,19 +12,21 @@ from sse_starlette.sse import EventSourceResponse
 
 from config import NESTJS_CALLBACK_URL
 from state import ReviewState
-from graph.pipeline import run_pipeline
+from agents.search_agent import search_agent
+from agents.screening_agent import screening_agent
+from agents.eligibility_agent import eligibility_agent
+from agents.extraction_agent import extraction_agent
+from agents.writer_agent import writer_agent
 
 
-# In-memory store: session_id → asyncio.Queue for SSE events
+# In-memory stores
 _event_queues: dict[str, asyncio.Queue] = {}
-# In-memory store: session_id → final state (after completion)
 _session_states: dict[str, ReviewState] = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    # Cleanup queues on shutdown
     _event_queues.clear()
     _session_states.clear()
 
@@ -42,7 +42,7 @@ app.add_middleware(
 )
 
 
-# ── Request / Response Models ──────────────────────────────────────────────────
+# ── Models ────────────────────────────────────────────────────────────────────
 
 class PipelineRequest(BaseModel):
     session_id: str
@@ -51,6 +51,9 @@ class PipelineRequest(BaseModel):
     inclusion_criteria: list[str]
     exclusion_criteria: list[str]
 
+class StageRequest(BaseModel):
+    session_id: str
+    criteria: list[str] = []
 
 class PipelineResponse(BaseModel):
     session_id: str
@@ -65,26 +68,12 @@ def _get_or_create_queue(session_id: str) -> asyncio.Queue:
     return _event_queues[session_id]
 
 
-async def _run_and_notify(state: ReviewState, session_id: str):
-    """Run the pipeline, emitting events into the session queue, then call NestJS."""
+async def _emit_to(session_id: str, event: dict):
     queue = _get_or_create_queue(session_id)
-
-    async def emit(event: dict):
-        await queue.put(event)
-
-    try:
-        final_state = await run_pipeline(state, emit)
-        _session_states[session_id] = final_state
-        # Notify NestJS backend with final results
-        await _notify_nestjs(session_id, final_state)
-    except Exception as e:
-        error_event = {"type": "error", "agent": "Pipeline", "message": str(e)}
-        await queue.put(error_event)
-        await queue.put({"type": "pipeline_done", "session_id": session_id, "report_preview": ""})
+    await queue.put(event)
 
 
 async def _notify_nestjs(session_id: str, final_state: ReviewState):
-    """POST final results back to NestJS for DB persistence."""
     url = f"{NESTJS_CALLBACK_URL}/api/sessions/{session_id}/complete"
     payload = {
         "prisma_stats": final_state.get("prisma_stats", {}),
@@ -95,8 +84,77 @@ async def _notify_nestjs(session_id: str, final_state: ReviewState):
         async with httpx.AsyncClient(timeout=30.0) as client:
             await client.post(url, json=payload)
     except Exception:
-        # Non-fatal: NestJS may not be available in standalone mode
         pass
+
+
+# ── Stage runners ─────────────────────────────────────────────────────────────
+
+async def _run_search(state: ReviewState, session_id: str):
+    async def emit(event: dict):
+        await _emit_to(session_id, event)
+    try:
+        result = await search_agent(state, emit)
+        state.update(result)
+        _session_states[session_id] = state
+        await _emit_to(session_id, {
+            "type": "stage_complete",
+            "stage": "identification",
+            "count": state.get("prisma_stats", {}).get("identified", 0),
+        })
+    except Exception as e:
+        await _emit_to(session_id, {"type": "error", "agent": "SearchAgent", "message": str(e)})
+
+
+async def _run_screening(state: ReviewState, session_id: str):
+    async def emit(event: dict):
+        await _emit_to(session_id, event)
+    try:
+        result = await screening_agent(state, emit)
+        state.update(result)
+        _session_states[session_id] = state
+        await _emit_to(session_id, {
+            "type": "stage_complete",
+            "stage": "screening",
+            "count": state.get("prisma_stats", {}).get("screened", 0),
+        })
+    except Exception as e:
+        await _emit_to(session_id, {"type": "error", "agent": "ScreeningAgent", "message": str(e)})
+
+
+async def _run_eligibility(state: ReviewState, session_id: str):
+    async def emit(event: dict):
+        await _emit_to(session_id, event)
+    try:
+        result = await eligibility_agent(state, emit)
+        state.update(result)
+        _session_states[session_id] = state
+        await _emit_to(session_id, {
+            "type": "stage_complete",
+            "stage": "eligibility",
+            "count": state.get("prisma_stats", {}).get("eligible", 0),
+        })
+    except Exception as e:
+        await _emit_to(session_id, {"type": "error", "agent": "EligibilityAgent", "message": str(e)})
+
+
+async def _run_inclusion(state: ReviewState, session_id: str):
+    async def emit(event: dict):
+        await _emit_to(session_id, event)
+    try:
+        result = await extraction_agent(state, emit)
+        state.update(result)
+        result2 = await writer_agent(state, emit)
+        state.update(result2)
+        _session_states[session_id] = state
+        await _notify_nestjs(session_id, state)
+        await _emit_to(session_id, {
+            "type": "pipeline_done",
+            "session_id": session_id,
+            "report_preview": (state.get("review_report") or "")[:200],
+        })
+    except Exception as e:
+        await _emit_to(session_id, {"type": "error", "agent": "Pipeline", "message": str(e)})
+        await _emit_to(session_id, {"type": "pipeline_done", "session_id": session_id, "report_preview": ""})
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -108,11 +166,11 @@ async def health():
 
 @app.post("/pipeline/start", response_model=PipelineResponse)
 async def start_pipeline(body: PipelineRequest):
-    """NestJS calls this to kick off the PRISMA pipeline for a session."""
+    """식별(Identification) 단계만 실행 — 검색 결과 반환 후 대기."""
     session_id = body.session_id
-    _get_or_create_queue(session_id)  # Pre-create queue so SSE can subscribe immediately
+    _get_or_create_queue(session_id)
 
-    initial_state: ReviewState = {
+    state: ReviewState = {
         "session_id": session_id,
         "query": body.query,
         "search_terms": body.search_terms,
@@ -128,16 +186,60 @@ async def start_pipeline(body: PipelineRequest):
         "status": "running",
         "error": None,
     }
+    _session_states[session_id] = state
 
-    # Run pipeline in background task so this endpoint returns immediately
-    asyncio.create_task(_run_and_notify(initial_state, session_id))
-
+    asyncio.create_task(_run_search(state, session_id))
     return PipelineResponse(session_id=session_id, status="started")
+
+
+@app.post("/pipeline/screening", response_model=PipelineResponse)
+async def run_screening(body: StageRequest):
+    """선별(Screening) 단계 실행 — 사용자 기준 적용."""
+    session_id = body.session_id
+    state = _session_states.get(session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if body.criteria:
+        state["inclusion_criteria"] = body.criteria
+
+    asyncio.create_task(_run_screening(state, session_id))
+    return PipelineResponse(session_id=session_id, status="screening")
+
+
+@app.post("/pipeline/eligibility", response_model=PipelineResponse)
+async def run_eligibility(body: StageRequest):
+    """적격성(Eligibility) 단계 실행 — 사용자 기준 적용."""
+    session_id = body.session_id
+    state = _session_states.get(session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if body.criteria:
+        state["inclusion_criteria"] = body.criteria
+
+    asyncio.create_task(_run_eligibility(state, session_id))
+    return PipelineResponse(session_id=session_id, status="eligibility")
+
+
+@app.post("/pipeline/inclusion", response_model=PipelineResponse)
+async def run_inclusion(body: StageRequest):
+    """포함(Inclusion) + 리포트 작성 단계 실행."""
+    session_id = body.session_id
+    state = _session_states.get(session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if body.criteria:
+        state["inclusion_criteria"] = body.criteria
+
+    asyncio.create_task(_run_inclusion(state, session_id))
+    return PipelineResponse(session_id=session_id, status="inclusion")
 
 
 @app.get("/stream/{session_id}")
 async def stream_events(session_id: str):
-    """Frontend subscribes here for real-time SSE events from the pipeline."""
+    """Frontend SSE 구독 엔드포인트."""
     queue = _get_or_create_queue(session_id)
 
     async def event_generator():
@@ -148,7 +250,6 @@ async def stream_events(session_id: str):
                 if event.get("type") == "pipeline_done":
                     break
             except asyncio.TimeoutError:
-                # Heartbeat to keep connection alive
                 yield {"data": json.dumps({"type": "heartbeat"})}
 
     return EventSourceResponse(event_generator())
@@ -156,7 +257,6 @@ async def stream_events(session_id: str):
 
 @app.get("/sessions/{session_id}/state")
 async def get_session_state(session_id: str):
-    """Return final state after pipeline completion."""
     state = _session_states.get(session_id)
     if not state:
         raise HTTPException(status_code=404, detail="Session not found or still running")

@@ -26,6 +26,16 @@ export class ResearchController {
     return this.researchService.getSession(id);
   }
 
+  /** Run a specific PRISMA stage with user-provided criteria */
+  @Post('sessions/:id/run-stage')
+  @HttpCode(HttpStatus.OK)
+  async runStage(
+    @Param('id') id: string,
+    @Body() body: { stage: 'screening' | 'eligibility' | 'inclusion'; criteria?: string[] },
+  ) {
+    return this.researchService.runStage(id, body.stage, body.criteria || []);
+  }
+
   /** Called by FastAPI when pipeline finishes — saves results to DB */
   @Post('sessions/:id/complete')
   @HttpCode(HttpStatus.OK)

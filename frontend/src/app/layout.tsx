@@ -1,27 +1,35 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import Mascot from '@/components/Mascot';
+import ConditionalHeader from '@/components/ConditionalHeader';
+import localFont from 'next/font/local';
+
+const iris = localFont({
+  src: '../../public/fonts/Pretendard-SemiBold.otf',
+  variable: '--font-iris',
+});
 
 export const metadata: Metadata = {
-  title: 'PRISMA AI Research Agent',
-  description: 'Automated systematic literature review using PRISMA methodology',
+  title: 'Gachon Scholar',
+  description: 'AI 기반 체계적 문헌 고찰 자동화',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
-      <body className="min-h-screen">
-        <header className="bg-white border-b border-gray-200 shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white text-sm font-bold">P</span>
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-gray-900">PRISMA AI Research Agent</h1>
-              <p className="text-xs text-gray-500">Automated Systematic Literature Review</p>
-            </div>
-          </div>
-        </header>
-        <main className="max-w-7xl mx-auto px-4 py-8">{children}</main>
+      <head>
+        <link
+          href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className={`min-h-screen bg-white ${iris.variable}`}>
+        <ConditionalHeader />
+        <main>{children}</main>
+        <Mascot />
+        <footer className="fixed bottom-0 left-0 right-0 flex justify-end px-6 py-2 text-[11px] text-gray-400">
+          © {new Date().getFullYear()} 가천대학교 일반대학원
+        </footer>
       </body>
     </html>
   );
