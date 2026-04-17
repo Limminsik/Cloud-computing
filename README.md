@@ -26,25 +26,20 @@ Gachon Scholar는 연구 주제를 입력하면 **PRISMA 2020** 방법론에 따
 
 ## 파이프라인
 
-```
-연구 주제 입력
-      │
-      ▼
-① Search Agent       PubMed · Semantic Scholar · Google Scholar 병렬 검색
-                     중복 제거 후 수백 건 수집
-      │  ⏸ 식별된 논문 확인 및 선별 기준 설정
-      ▼
-② Screening Agent    제목·초록 기반 1차 선별  (Gemini 2.5 Flash)
-      │  ⏸ 적격성 기준 설정
-      ▼
-③ Eligibility Agent  PMC · arXiv · Unpaywall로 전문 확보 후 심층 평가  (Claude Sonnet)
-      │  ⏸ 최종 포함 기준 설정
-      ▼
-④ Extraction Agent   포함 논문에서 연구 설계·결과·방법론 데이터 추출  (Claude Sonnet)
-      │
-      ▼
-⑤ Writer Agent       PRISMA 형식의 체계적 리뷰 보고서 자동 생성  (Claude Sonnet)
-```
+<div align="center">
+
+| 단계 | 에이전트 | 역할 | 모델 |
+|:---:|:---:|---|:---:|
+| 🔍 **1** | **Search** | PubMed · Semantic Scholar · Google Scholar 병렬 검색 및 중복 제거 | Gemini |
+| ⏸ | | *연구자: 식별된 논문 확인 후 선별 기준 설정* | |
+| 📋 **2** | **Screening** | 제목·초록 기반 1차 선별 | Gemini |
+| ⏸ | | *연구자: 적격성 평가 기준 설정* | |
+| 📄 **3** | **Eligibility** | 논문 전문(Full-text) 확보 후 적격성 심층 평가 | Claude |
+| ⏸ | | *연구자: 최종 포함 기준 설정* | |
+| 🔬 **4** | **Extraction** | 포함 논문에서 연구 설계·결과·방법론 데이터 추출 | Claude |
+| 📝 **5** | **Writer** | PRISMA 형식 체계적 리뷰 보고서 자동 생성 | Claude |
+
+</div>
 
 ---
 
