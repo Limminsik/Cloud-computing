@@ -24,8 +24,6 @@ export default function ConditionalHeader() {
       </a>
       <nav className="flex items-center gap-4 text-sm text-gray-600">
         <HistorySidebar />
-        <a href="#" className="hover:text-blue-700">내 서재</a>
-        <a href="#" className="hover:text-blue-700">설정</a>
       </nav>
     </header>
   );
