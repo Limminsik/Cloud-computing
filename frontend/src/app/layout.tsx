@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main>{children}</main>
         <Mascot />
         <footer className="fixed bottom-0 left-0 right-0 flex justify-end px-6 py-2 text-[11px] text-gray-400">
-          © {new Date().getFullYear()} 가천대학교 일반대학원
+          © {new Date().getFullYear()} 가천대학교 일반대학원 컴퓨터공학과
         </footer>
       </body>
     </html>
