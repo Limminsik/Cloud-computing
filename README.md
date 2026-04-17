@@ -27,18 +27,47 @@ Gachon Scholar는 연구 주제를 입력하면 **PRISMA 2020** 방법론에 따
 ## 파이프라인
 
 <div align="center">
+<br>
 
-| 단계 | 에이전트 | 역할 | 모델 |
-|:---:|:---:|---|:---:|
-| 🔍 **1** | **Search** | PubMed · Semantic Scholar · Google Scholar 병렬 검색 및 중복 제거 | Gemini |
-| ⏸ | | *연구자: 식별된 논문 확인 후 선별 기준 설정* | |
-| 📋 **2** | **Screening** | 제목·초록 기반 1차 선별 | Gemini |
-| ⏸ | | *연구자: 적격성 평가 기준 설정* | |
-| 📄 **3** | **Eligibility** | 논문 전문(Full-text) 확보 후 적격성 심층 평가 | Claude |
-| ⏸ | | *연구자: 최종 포함 기준 설정* | |
-| 🔬 **4** | **Extraction** | 포함 논문에서 연구 설계·결과·방법론 데이터 추출 | Claude |
-| 📝 **5** | **Writer** | PRISMA 형식 체계적 리뷰 보고서 자동 생성 | Claude |
+<table>
+<tr>
+  <td align="center" width="140">
+    <b>🔍 Search</b><br/>
+    <sub>PubMed · Semantic Scholar<br/>Google Scholar 병렬 검색</sub><br/><br/>
+    <img src="https://img.shields.io/badge/Gemini-Flash-4285F4?style=flat-square&logo=google"/>
+  </td>
+  <td align="center" width="36"><sub>연구자<br/>검토 ⏸</sub></td>
+  <td align="center" width="140">
+    <b>📋 Screening</b><br/>
+    <sub>제목·초록 기반<br/>1차 선별</sub><br/><br/>
+    <img src="https://img.shields.io/badge/Gemini-Flash-4285F4?style=flat-square&logo=google"/>
+  </td>
+  <td align="center" width="36"><sub>연구자<br/>검토 ⏸</sub></td>
+  <td align="center" width="140">
+    <b>📄 Eligibility</b><br/>
+    <sub>전문 확보 후<br/>적격성 심층 평가</sub><br/><br/>
+    <img src="https://img.shields.io/badge/Claude-Sonnet-blueviolet?style=flat-square"/>
+  </td>
+  <td align="center" width="36"><sub>연구자<br/>검토 ⏸</sub></td>
+  <td align="center" width="140">
+    <b>🔬 Extraction</b><br/>
+    <sub>포함 논문<br/>데이터 추출</sub><br/><br/>
+    <img src="https://img.shields.io/badge/Claude-Sonnet-blueviolet?style=flat-square"/>
+  </td>
+  <td align="center" width="36">→</td>
+  <td align="center" width="140">
+    <b>📝 Writer</b><br/>
+    <sub>PRISMA 형식<br/>리뷰 보고서 생성</sub><br/><br/>
+    <img src="https://img.shields.io/badge/Claude-Sonnet-blueviolet?style=flat-square"/>
+  </td>
+</tr>
+</table>
 
+<br/>
+
+> ⏸ 표시 단계에서 연구자가 포함·제외 기준을 직접 설정하거나 수정할 수 있습니다.
+
+<br/>
 </div>
 
 ---
