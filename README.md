@@ -26,49 +26,40 @@ Gachon Scholar는 연구 주제를 입력하면 **PRISMA 2020** 방법론에 따
 
 ## 파이프라인
 
-<div align="center">
-<br>
+```mermaid
+flowchart LR
+    INPUT(["🖊️ 연구 주제 입력"]):::input
 
-<table>
-<tr>
-  <td align="center" width="140">
-    <b>🔍 Search</b><br/>
-    <sub>PubMed · Semantic Scholar<br/>Google Scholar 병렬 검색</sub><br/><br/>
-    <img src="https://img.shields.io/badge/Gemini-Flash-4285F4?style=flat-square&logo=google"/>
-  </td>
-  <td align="center" width="36"><sub>연구자<br/>검토 ⏸</sub></td>
-  <td align="center" width="140">
-    <b>📋 Screening</b><br/>
-    <sub>제목·초록 기반<br/>1차 선별</sub><br/><br/>
-    <img src="https://img.shields.io/badge/Gemini-Flash-4285F4?style=flat-square&logo=google"/>
-  </td>
-  <td align="center" width="36"><sub>연구자<br/>검토 ⏸</sub></td>
-  <td align="center" width="140">
-    <b>📄 Eligibility</b><br/>
-    <sub>전문 확보 후<br/>적격성 심층 평가</sub><br/><br/>
-    <img src="https://img.shields.io/badge/Claude-Sonnet-blueviolet?style=flat-square"/>
-  </td>
-  <td align="center" width="36"><sub>연구자<br/>검토 ⏸</sub></td>
-  <td align="center" width="140">
-    <b>🔬 Extraction</b><br/>
-    <sub>포함 논문<br/>데이터 추출</sub><br/><br/>
-    <img src="https://img.shields.io/badge/Claude-Sonnet-blueviolet?style=flat-square"/>
-  </td>
-  <td align="center" width="36">→</td>
-  <td align="center" width="140">
-    <b>📝 Writer</b><br/>
-    <sub>PRISMA 형식<br/>리뷰 보고서 생성</sub><br/><br/>
-    <img src="https://img.shields.io/badge/Claude-Sonnet-blueviolet?style=flat-square"/>
-  </td>
-</tr>
-</table>
+    subgraph S1["① Identification"]
+        A["🔍 Search Agent\n───────────────\nPubMed · Semantic Scholar\nGoogle Scholar 병렬 검색"]:::gemini
+    end
 
-<br/>
+    subgraph S2["② Screening"]
+        B["📋 Screening Agent\n───────────────\n제목 · 초록 기반\n1차 선별"]:::gemini
+    end
 
-> ⏸ 표시 단계에서 연구자가 포함·제외 기준을 직접 설정하거나 수정할 수 있습니다.
+    subgraph S3["③ Eligibility"]
+        C["📄 Eligibility Agent\n───────────────\n전문(Full-text) 확보\n적격성 심층 평가"]:::claude
+    end
 
-<br/>
-</div>
+    subgraph S4["④ Extraction"]
+        D["🔬 Extraction Agent\n───────────────\n연구 설계 · 결과\n데이터 구조화"]:::claude
+    end
+
+    subgraph S5["⑤ Synthesis"]
+        E["📝 Writer Agent\n───────────────\nPRISMA 형식\n리뷰 보고서 생성"]:::claude
+    end
+
+    INPUT --> S1
+    S1 -->|"⏸ 연구자 검토"| S2
+    S2 -->|"⏸ 연구자 검토"| S3
+    S3 -->|"⏸ 연구자 검토"| S4
+    S4 --> S5
+
+    classDef gemini fill:#e8f0fe,stroke:#4285F4,color:#1a73e8
+    classDef claude fill:#f3e8ff,stroke:#7c3aed,color:#6d28d9
+    classDef input fill:#f0fdf4,stroke:#16a34a,color:#15803d
+```
 
 ---
 
