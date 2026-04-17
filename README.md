@@ -2,193 +2,107 @@
 
 # [Gachon Scholar](https://github.com/Limminsik/gachonscholar)
 
-**AI-powered Systematic Literature Review Platform**
+**AI 멀티에이전트 기반 체계적 문헌 고찰 자동화 플랫폼**
 
-*Enter a research topic. Get a full PRISMA-compliant review report — automatically.*
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2-orange)](https://langchain-ai.github.io/langgraph/)
 [![Claude](https://img.shields.io/badge/Claude-Sonnet%204.6-blueviolet)](https://www.anthropic.com/)
+[![Gemini](https://img.shields.io/badge/Gemini-2.5%20Flash-4285F4)](https://deepmind.google/technologies/gemini/)
+
+![메인 화면](docs/screenshots/main.png)
 
 </div>
 
 ---
 
-## Overview
+## 소개
 
-Gachon Scholar automates the entire systematic literature review (SLR) process using a **multi-agent AI pipeline** built on LangGraph. What typically takes researchers weeks to complete manually — searching hundreds of papers, screening by criteria, assessing eligibility, and synthesizing findings — is executed in minutes.
+Gachon Scholar는 연구 주제를 입력하면 **PRISMA 2020** 방법론에 따라 논문 검색부터 최종 리뷰 보고서 작성까지 AI가 자동으로 수행하는 체계적 문헌 고찰(SLR) 플랫폼입니다.
 
-The platform follows **PRISMA 2020** methodology with a **Human-in-the-Loop** design: AI handles the heavy lifting at each stage while researchers retain control over inclusion/exclusion criteria before every step.
+연구자가 수 주에 걸쳐 수행하던 작업을 단 몇 분 안에 처리하면서도, 각 단계마다 연구자가 기준을 직접 설정·검토할 수 있는 **Human-in-the-Loop** 구조로 설계되었습니다.
 
 ---
 
-## How It Works
+## 파이프라인
 
 ```
- Input: research query
-        │
-        ▼
-┌───────────────────┐
-│  Search Agent     │  Queries PubMed · Semantic Scholar · Google Scholar in parallel
-│  (Gemini Flash)   │  Deduplicates and merges hundreds of results
-└─────────┬─────────┘
-          │  ⏸ User reviews identified papers & sets screening criteria
-          ▼
-┌───────────────────┐
-│  Screening Agent  │  Title & abstract screening against user-defined criteria
-│  (Gemini Flash)   │  Batch-processes up to 50 papers per LLM call
-└─────────┬─────────┘
-          │  ⏸ User confirms criteria before eligibility assessment
-          ▼
-┌───────────────────┐
-│ Eligibility Agent │  Retrieves full text via PMC · arXiv · Unpaywall · OA PDF
-│  (Claude Sonnet)  │  Performs in-depth PRISMA eligibility assessment
-└─────────┬─────────┘
-          │  ⏸ User sets final inclusion criteria
-          ▼
-┌───────────────────┐
-│ Extraction Agent  │  Extracts structured data from included papers
-│  (Claude Sonnet)  │  (study design, findings, methods, limitations)
-└─────────┬─────────┘
-          ▼
-┌───────────────────┐
-│   Writer Agent    │  Synthesizes all findings into a full SLR report
-│  (Claude Sonnet)  │  PRISMA-formatted, 1500+ words, downloadable as Markdown
-└───────────────────┘
+연구 주제 입력
+      │
+      ▼
+① Search Agent       PubMed · Semantic Scholar · Google Scholar 병렬 검색
+                     중복 제거 후 수백 건 수집
+      │  ⏸ 식별된 논문 확인 및 선별 기준 설정
+      ▼
+② Screening Agent    제목·초록 기반 1차 선별  (Gemini 2.5 Flash)
+      │  ⏸ 적격성 기준 설정
+      ▼
+③ Eligibility Agent  PMC · arXiv · Unpaywall로 전문 확보 후 심층 평가  (Claude Sonnet)
+      │  ⏸ 최종 포함 기준 설정
+      ▼
+④ Extraction Agent   포함 논문에서 연구 설계·결과·방법론 데이터 추출  (Claude Sonnet)
+      │
+      ▼
+⑤ Writer Agent       PRISMA 형식의 체계적 리뷰 보고서 자동 생성  (Claude Sonnet)
 ```
 
 ---
 
-## Key Features
+## 주요 기능
 
-**Real-time pipeline monitoring**  
-Every agent action streams live to the browser via SSE. Watch papers get screened one by one, with include/exclude decisions and reasoning displayed as they happen.
-
-**Interactive PRISMA flow panel**  
-A side panel visualizes each PRISMA stage with live counts and exclusion tallies. Each stage gate shows a criteria input — leave blank for AI-only judgment, or specify your own rules.
-
-**Multi-source full-text retrieval**  
-The Eligibility Agent doesn't rely solely on abstracts. It systematically attempts to obtain full text from PubMed Central, arXiv (ar5iv), Unpaywall, and open-access PDF links before falling back to abstract-only assessment.
-
-**Persistent session state**  
-Every stage result is saved to the database immediately after completion. Returning to a past session — even after a server restart — fully restores identified papers, screening decisions, PRISMA statistics, and agent statuses.
-
-**SSE reconnect replay**  
-On reconnect or page revisit, the server replays the current LangGraph checkpoint as SSE events, so the UI reconstructs its state without a page reload.
-
-**Paper explorer with filters**  
-Filter the paper list by PRISMA stage (screened / eligible / included) and decision (include / exclude), with keyword highlighting matched to your original query.
+- **실시간 진행 스트리밍** — 에이전트 동작과 논문별 포함/제외 판정이 SSE로 라이브 표시
+- **단계별 기준 직접 설정** — 각 PRISMA 단계 전에 포함/제외 기준을 자유롭게 입력하거나 생략 가능
+- **전문(Full-text) 자동 확보** — PubMed Central, arXiv, Unpaywall, OA PDF를 순차적으로 시도
+- **세션 영속성** — 단계 완료 시 즉시 DB 저장, 페이지 재방문 시 SSE 재연결로 상태 완전 복원
+- **논문 필터 탐색** — PRISMA 단계별·판정별 필터와 검색어 하이라이팅
+- **보고서 다운로드** — 최종 리뷰 보고서를 Markdown 파일로 내보내기
 
 ---
 
-## Architecture
+## 기술 스택
 
-```
-┌─────────────────────────────────────────────────────┐
-│                Browser (Next.js 14)                  │
-│  SSE stream ◄──────────────────────────────────┐    │
-│  REST calls ──────────────────────────────────┐ │   │
-└───────────────────────────────────────────────┼─┼───┘
-                                                │ │
-                                ┌───────────────▼─┴───┐
-                                │   NestJS Backend     │
-                                │   (port 4000)        │
-                                │   Prisma ORM         │
-                                └──────────┬─────┬─────┘
-                                           │     │
-                          ┌────────────────▼┐  ┌─▼──────────┐
-                          │   PostgreSQL     │  │ FastAPI     │
-                          │   (port 5432)   │  │ AI Service  │
-                          └─────────────────┘  │ (port 8000) │
-                                               │ LangGraph   │
-                                               │ MemorySaver │
-                                               └─────────────┘
-```
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 14, TypeScript, Tailwind CSS |
-| Backend | NestJS 10, Prisma ORM, PostgreSQL 16 |
-| AI Pipeline | FastAPI, LangGraph StateGraph, MemorySaver |
-| Search AI | Google Gemini 2.5 Flash Lite |
-| Review AI | Anthropic Claude Sonnet 4.6 |
-| Paper Sources | PubMed E-utilities, Semantic Scholar Graph API, SerpAPI |
-| Realtime | Server-Sent Events (SSE) |
-| Infrastructure | Docker Compose |
+| 영역 | 기술 |
+|------|------|
+| 프론트엔드 | Next.js 14, TypeScript, Tailwind CSS |
+| 백엔드 | NestJS 10, Prisma ORM, PostgreSQL 16 |
+| AI 파이프라인 | FastAPI, LangGraph StateGraph, MemorySaver |
+| 검색·선별 AI | Google Gemini 2.5 Flash Lite |
+| 적격성·보고서 AI | Anthropic Claude Sonnet 4.6 |
+| 논문 검색 소스 | PubMed E-utilities, Semantic Scholar Graph API, SerpAPI |
+| 실시간 통신 | Server-Sent Events (SSE) |
+| 인프라 | Docker Compose |
 
 ---
 
-## Screenshots
-
-> Agent pipeline sidebar · PRISMA interactive flow · Paper decision list · Live log
+## 프로젝트 구조
 
 ```
-┌──────────────┬────────────────────────────────────┬──────────────────┐
-│ Agent        │  식별(187)  심사(144)  리포트       │  PRISMA Flow     │
-│ Pipeline     │                                    │                  │
-│              │  ┌─────────────────────────────┐  │  Identification  │
-│ ✓ Search     │  │ Paper Title                 │  │  187 ✓           │
-│ ✓ Screening  │  │ [포함]  [RCT][신뢰도:high]  │  │                  │
-│ ● Eligibility│  │ ...                         │  │  Screening ✓     │
-│ ○ Extraction │  └─────────────────────────────┘  │  144             │
-│ ○ Writer     │                                    │                  │
-│              │  [단계별 필터] [판정 필터]          │  ▶ Eligibility   │
-└──────────────┴────────────────────────────────────┴──────────────────┘
+Cloud-computing/
+├── frontend/          Next.js 14 웹 앱
+├── backend/           NestJS API 서버 + PostgreSQL (Prisma)
+├── ai-service/        FastAPI AI 파이프라인
+│   ├── agents/        Search · Screening · Eligibility · Extraction · Writer
+│   ├── graph/         LangGraph 파이프라인 (interrupt_before 게이트)
+│   ├── sources/       PubMed · Semantic Scholar 어댑터
+│   └── utils/         전문 확보 유틸 (PMC, arXiv, Unpaywall)
+└── docker-compose.yml
 ```
 
 ---
 
-## Quick Start
+## 실행 방법
 
 ```bash
-# Clone
 git clone https://github.com/Limminsik/gachonscholar.git
 cd gachonscholar/Cloud-computing
 
-# Configure API keys
 cp .env.example .env
-# Fill in GOOGLE_API_KEY, ANTHROPIC_API_KEY, SERPAPI_API_KEY
+# .env에 API 키 입력 (GOOGLE_API_KEY, ANTHROPIC_API_KEY, SERPAPI_API_KEY)
 
-# Run
 docker-compose up --build
 # → http://localhost:3000
 ```
 
 ---
 
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `GOOGLE_API_KEY` | Gemini API key (Search & Screening agents) |
-| `ANTHROPIC_API_KEY` | Claude API key (Eligibility, Extraction & Writer agents) |
-| `SERPAPI_API_KEY` | SerpAPI key for Google Scholar |
-| `CONTACT_EMAIL` | Email for PubMed & Unpaywall polite-pool requests |
-| `DATABASE_URL` | PostgreSQL connection string |
-
----
-
-## Project Structure
-
-```
-Cloud-computing/
-├── frontend/               Next.js 14 app
-│   └── src/
-│       ├── app/            pages (home, results/[id])
-│       └── components/     AgentStatusCards, PrismaInteractiveFlow,
-│                           PaperList, IdentifiedPaperList, LiveLog, …
-├── backend/                NestJS API
-│   └── src/research/       session CRUD, stage-result persistence
-├── ai-service/             FastAPI + LangGraph pipeline
-│   ├── agents/             5 AI agents
-│   ├── graph/pipeline.py   StateGraph with interrupt_before hooks
-│   ├── sources/            PubMed & Semantic Scholar adapters
-│   └── utils/              full-text retrieval (PMC, arXiv, Unpaywall)
-└── docker-compose.yml
-```
-
----
-
-*Gachon University · Cloud Computing Capstone Project*
+*가천대학교 · 클라우드컴퓨팅 프로젝트*
