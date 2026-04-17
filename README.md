@@ -28,38 +28,22 @@ Gachon Scholar는 연구 주제를 입력하면 **PRISMA 2020** 방법론에 따
 
 ```mermaid
 flowchart LR
-    INPUT(["🖊️ 연구 주제 입력"]):::input
+    A["🔍 Search\n─────────────\nPubMed · S2 · Scholar\n병렬 검색 및 중복 제거"]
+    B["📋 Screening\n─────────────\n제목·초록 기반\n1차 선별"]
+    C["📄 Eligibility\n─────────────\n전문 확보 후\n적격성 심층 평가"]
+    D["🔬 Extraction\n─────────────\n포함 논문\n데이터 추출"]
+    E["📝 Writer\n─────────────\nPRISMA 형식\n리뷰 보고서 생성"]
 
-    subgraph S1["① Identification"]
-        A["🔍 Search Agent\n───────────────\nPubMed · Semantic Scholar\nGoogle Scholar 병렬 검색"]:::gemini
-    end
+    A --> B --> C --> D --> E
 
-    subgraph S2["② Screening"]
-        B["📋 Screening Agent\n───────────────\n제목 · 초록 기반\n1차 선별"]:::gemini
-    end
+    class A,B gemini
+    class C,D,E claude
 
-    subgraph S3["③ Eligibility"]
-        C["📄 Eligibility Agent\n───────────────\n전문(Full-text) 확보\n적격성 심층 평가"]:::claude
-    end
-
-    subgraph S4["④ Extraction"]
-        D["🔬 Extraction Agent\n───────────────\n연구 설계 · 결과\n데이터 구조화"]:::claude
-    end
-
-    subgraph S5["⑤ Synthesis"]
-        E["📝 Writer Agent\n───────────────\nPRISMA 형식\n리뷰 보고서 생성"]:::claude
-    end
-
-    INPUT --> S1
-    S1 -->|"⏸ 연구자 검토"| S2
-    S2 -->|"⏸ 연구자 검토"| S3
-    S3 -->|"⏸ 연구자 검토"| S4
-    S4 --> S5
-
-    classDef gemini fill:#e8f0fe,stroke:#4285F4,color:#1a73e8
-    classDef claude fill:#f3e8ff,stroke:#7c3aed,color:#6d28d9
-    classDef input fill:#f0fdf4,stroke:#16a34a,color:#15803d
+    classDef gemini fill:#dbeafe,stroke:#3b82f6,color:#1e40af
+    classDef claude fill:#ede9fe,stroke:#8b5cf6,color:#5b21b6
 ```
+
+> Search · Screening · Eligibility 단계 사이에서 연구자가 포함/제외 기준을 직접 설정하고 다음 단계를 실행합니다.
 
 ---
 
