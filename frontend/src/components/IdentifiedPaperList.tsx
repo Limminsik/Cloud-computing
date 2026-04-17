@@ -45,7 +45,7 @@ export default function IdentifiedPaperList({ papers, query = '' }: Props) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-gray-400">Google Scholar에서 식별된 논문 {papers.length}건</p>
+      <p className="text-xs text-gray-400">PubMed · Semantic Scholar · Google Scholar에서 식별된 논문 {papers.length}건</p>
 
       {papers.map((paper, i) => (
         <div

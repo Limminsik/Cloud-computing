@@ -12,6 +12,12 @@ import asyncio
 import re
 from typing import Any, Callable, Coroutine
 
+try:
+    import serpapi as _serpapi_lib
+    HAS_SERPAPI = True
+except ImportError:
+    HAS_SERPAPI = False
+
 from state import ReviewState, PaperInfo
 from config import SERPAPI_API_KEY
 from sources.pubmed import search_pubmed
@@ -20,7 +26,7 @@ from sources.semantic_scholar import search_semantic_scholar
 # ── SerpAPI / Google Scholar helpers ──────────────────────────────────────────
 
 _PAGE_SIZE = 10
-_MAX_PAGES = 5  # 임시: 무료 플랜 절약
+_MAX_PAGES = 5
 
 
 def _parse_authors_serpapi(pub_info: dict) -> list[str]:
@@ -38,8 +44,7 @@ def _extract_year(summary: str) -> int | None:
 
 
 def _fetch_scholar_first_page(query: str) -> tuple[list[dict], int]:
-    import serpapi as _serpapi
-    client = _serpapi.Client(api_key=SERPAPI_API_KEY)
+    client = _serpapi_lib.Client(api_key=SERPAPI_API_KEY)
     resp = client.search({"engine": "google_scholar", "q": query, "hl": "en", "num": _PAGE_SIZE, "start": 0})
     organic = resp.get("organic_results", [])
     total = resp.get("search_information", {}).get("total_results", len(organic))
@@ -47,15 +52,14 @@ def _fetch_scholar_first_page(query: str) -> tuple[list[dict], int]:
 
 
 def _fetch_scholar_page(query: str, start: int) -> list[dict]:
-    import serpapi as _serpapi
-    client = _serpapi.Client(api_key=SERPAPI_API_KEY)
+    client = _serpapi_lib.Client(api_key=SERPAPI_API_KEY)
     resp = client.search({"engine": "google_scholar", "q": query, "hl": "en", "num": _PAGE_SIZE, "start": start})
     return resp.get("organic_results", [])
 
 
 async def _fetch_scholar_all(query: str) -> tuple[list[dict], int]:
     """Fetch Google Scholar results (up to _MAX_PAGES pages) in parallel."""
-    first_page, total = await asyncio.get_event_loop().run_in_executor(
+    first_page, total = await asyncio.get_running_loop().run_in_executor(
         None, lambda: _fetch_scholar_first_page(query)
     )
     pages_needed = min(total // _PAGE_SIZE, _MAX_PAGES - 1)
@@ -63,7 +67,7 @@ async def _fetch_scholar_all(query: str) -> tuple[list[dict], int]:
         return first_page, total
 
     tasks = [
-        asyncio.get_event_loop().run_in_executor(None, lambda s=i * _PAGE_SIZE: _fetch_scholar_page(query, s))
+        asyncio.get_running_loop().run_in_executor(None, lambda s=i * _PAGE_SIZE: _fetch_scholar_page(query, s))
         for i in range(1, pages_needed + 1)
     ]
     rest = await asyncio.gather(*tasks, return_exceptions=True)
@@ -216,6 +220,9 @@ async def search_agent(
 # ── Source runners ─────────────────────────────────────────────────────────────
 
 async def _run_scholar(query: str, emit) -> tuple[list[PaperInfo], int]:
+    if not HAS_SERPAPI:
+        await emit({"type": "agent_progress", "agent": "SearchAgent", "message": "Google Scholar 건너뜀 (serpapi 미설치)"})
+        return [], 0
     await emit({"type": "agent_progress", "agent": "SearchAgent", "message": "Google Scholar 검색 중..."})
     try:
         items, total = await _fetch_scholar_all(query)
@@ -229,7 +236,7 @@ async def _run_scholar(query: str, emit) -> tuple[list[PaperInfo], int]:
 
 async def _run_pubmed(query: str, emit) -> tuple[list[PaperInfo], int]:
     await emit({"type": "agent_progress", "agent": "SearchAgent", "message": "PubMed 검색 중..."})
-    papers_raw, total = await asyncio.get_event_loop().run_in_executor(
+    papers_raw, total = await asyncio.get_running_loop().run_in_executor(
         None, lambda: search_pubmed(query, max_results=200)
     )
     papers = [_source_to_paper(p) for p in papers_raw]
@@ -239,7 +246,7 @@ async def _run_pubmed(query: str, emit) -> tuple[list[PaperInfo], int]:
 
 async def _run_semantic_scholar(query: str, emit) -> tuple[list[PaperInfo], int]:
     await emit({"type": "agent_progress", "agent": "SearchAgent", "message": "Semantic Scholar 검색 중..."})
-    papers_raw, total = await asyncio.get_event_loop().run_in_executor(
+    papers_raw, total = await asyncio.get_running_loop().run_in_executor(
         None, lambda: search_semantic_scholar(query, max_results=200)
     )
     papers = [_source_to_paper(p) for p in papers_raw]

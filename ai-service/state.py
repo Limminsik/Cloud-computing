@@ -15,8 +15,9 @@ class PaperInfo(TypedDict):
     extracted_data: Optional[Dict[str, Any]]
 
 
-class PrismaStats(TypedDict):
+class PrismaStats(TypedDict, total=False):
     identified: int
+    fetched: int   # deduplicated count actually collected
     screened: int
     eligible: int
     included: int

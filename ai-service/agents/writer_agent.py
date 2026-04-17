@@ -64,7 +64,7 @@ async def writer_agent(
     })
 
     try:
-        response = await asyncio.get_event_loop().run_in_executor(
+        response = await asyncio.get_running_loop().run_in_executor(
             None,
             lambda: llm.invoke([HumanMessage(content=prompt)])
         )
@@ -73,17 +73,10 @@ async def writer_agent(
         await emit({"type": "error", "agent": "WriterAgent", "message": f"작성 오류: {str(e)}"})
         review_report = f"# 오류 발생\n\n리뷰 논문 생성 중 오류가 발생했습니다: {str(e)}"
 
-    preview = review_report[:300] + "..." if len(review_report) > 300 else review_report
-
     await emit({
         "type": "agent_complete",
         "agent": "WriterAgent",
         "message": f"리뷰 논문 작성 완료 ({len(review_report)}자)",
-    })
-    await emit({
-        "type": "pipeline_done",
-        "session_id": state["session_id"],
-        "report_preview": preview,
     })
 
     return {

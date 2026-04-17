@@ -58,7 +58,7 @@ async def extraction_agent(
         })
 
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
+            response = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda p=prompt: llm.invoke([HumanMessage(content=p)])
             )

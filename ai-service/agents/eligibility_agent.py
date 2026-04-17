@@ -71,7 +71,7 @@ async def _assess_one(
     abstract = paper.get("abstract", "") or ""
 
     # Pass full paper dict so fetch_fulltext can try all URL strategies
-    full_text = await asyncio.get_event_loop().run_in_executor(
+    full_text = await asyncio.get_running_loop().run_in_executor(
         None, lambda: fetch_fulltext(dict(paper))
     )
 
@@ -92,7 +92,7 @@ async def _assess_one(
         content=content,
     )
 
-    response = await asyncio.get_event_loop().run_in_executor(
+    response = await asyncio.get_running_loop().run_in_executor(
         None,
         lambda p=prompt: llm.invoke([HumanMessage(content=p)])
     )

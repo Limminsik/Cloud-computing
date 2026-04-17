@@ -70,15 +70,16 @@ export default function PaperList({ papers, query = '', isProcessing = false }: 
   }, {} as Record<string, { total: number; include: number; exclude: number }>);
 
   return (
-    <div className="flex gap-4">
+    <div className="space-y-3">
       {/* 진행 중 배너 */}
       {isProcessing && (
-        <div className="absolute top-0 left-0 right-0 bg-blue-50 border-b border-blue-100 px-4 py-1.5 text-xs text-blue-600 flex items-center gap-2">
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-1.5 text-xs text-blue-600 flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse inline-block" />
           AI가 논문을 심사하고 있습니다... ({papers.length}건 처리됨)
         </div>
       )}
 
+    <div className="flex gap-4">
       {/* 좌측 필터 패널 */}
       <aside className="w-44 flex-shrink-0 space-y-5">
         {/* 단계별 포함/제외 통계 */}
@@ -206,6 +207,7 @@ export default function PaperList({ papers, query = '', isProcessing = false }: 
           ))
         )}
       </div>
+    </div>
     </div>
   );
 }
