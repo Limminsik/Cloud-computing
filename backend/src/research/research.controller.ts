@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { ResearchService } from './research.service';
 import { CreateResearchDto } from './dto/create-research.dto';
 import { CompleteSessionDto } from './dto/complete-session.dto';
@@ -24,6 +24,33 @@ export class ResearchController {
   @Get('sessions/:id')
   async getSession(@Param('id') id: string) {
     return this.researchService.getSession(id);
+  }
+
+  /** Save identified papers from search stage */
+  @Post('sessions/:id/identified')
+  @HttpCode(HttpStatus.OK)
+  async saveIdentified(
+    @Param('id') id: string,
+    @Body() body: { papers: any[]; prisma_stats?: any },
+  ) {
+    return this.researchService.saveIdentifiedPapers(id, body.papers, body.prisma_stats);
+  }
+
+  /** Save intermediate stage results (screened / eligible / included) */
+  @Post('sessions/:id/stage-results')
+  @HttpCode(HttpStatus.OK)
+  async saveStageResults(
+    @Param('id') id: string,
+    @Body() body: { stage: 'screened' | 'eligible' | 'included'; papers: any[]; prisma_stats?: any },
+  ) {
+    return this.researchService.saveStageResults(id, body.stage, body.papers, body.prisma_stats);
+  }
+
+  /** Delete a session */
+  @Delete('sessions/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteSession(@Param('id') id: string) {
+    return this.researchService.deleteSession(id);
   }
 
   /** Run a specific PRISMA stage with user-provided criteria */

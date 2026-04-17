@@ -8,6 +8,14 @@ export default function HistorySidebar() {
   const [open, setOpen] = useState(false);
   const [sessions, setSessions] = useState<ResearchSession[]>([]);
 
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const NESTJS_URL = process.env.NEXT_PUBLIC_NESTJS_URL || 'http://localhost:4000';
+    await fetch(`${NESTJS_URL}/api/sessions/${id}`, { method: 'DELETE' });
+    setSessions(prev => prev.filter(s => s.id !== id));
+  };
+
   useEffect(() => {
     if (open) {
       listSessions()
@@ -19,6 +27,9 @@ export default function HistorySidebar() {
   const statusLabel = (s: string) => {
     if (s === 'done') return <span className="text-green-600 text-xs">완료</span>;
     if (s === 'running') return <span className="text-blue-500 text-xs animate-pulse">실행 중</span>;
+    if (s === 'screening_done') return <span className="text-indigo-500 text-xs">선별 완료</span>;
+    if (s === 'eligibility_done') return <span className="text-purple-500 text-xs">적격 완료</span>;
+    if (s === 'inclusion_done') return <span className="text-teal-500 text-xs">추출 완료</span>;
     if (s === 'error') return <span className="text-red-500 text-xs">오류</span>;
     return <span className="text-gray-400 text-xs">{s}</span>;
   };
@@ -66,21 +77,30 @@ export default function HistorySidebar() {
             <ul className="divide-y divide-gray-50">
               {sessions.map((s) => (
                 <li key={s.id}>
-                  <Link
-                    href={`/results/${s.id}`}
-                    onClick={() => setOpen(false)}
-                    className="block px-4 py-3 hover:bg-gray-50 transition-colors"
-                  >
-                    <p className="text-sm text-gray-800 font-medium truncate">{s.query}</p>
-                    <div className="flex items-center justify-between mt-1">
-                      <p className="text-xs text-gray-400">
-                        {new Date(s.createdAt).toLocaleString('ko-KR', {
-                          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                        })}
-                      </p>
-                      {statusLabel(s.status)}
-                    </div>
-                  </Link>
+                  <div className="flex items-center group hover:bg-gray-50 transition-colors">
+                    <Link
+                      href={`/results/${s.id}`}
+                      onClick={() => setOpen(false)}
+                      className="flex-1 block px-4 py-3 min-w-0"
+                    >
+                      <p className="text-sm text-gray-800 font-medium truncate">{s.query}</p>
+                      <div className="flex items-center justify-between mt-1">
+                        <p className="text-xs text-gray-400">
+                          {new Date(s.createdAt).toLocaleString('ko-KR', {
+                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                          })}
+                        </p>
+                        {statusLabel(s.status)}
+                      </div>
+                    </Link>
+                    <button
+                      onClick={(e) => handleDelete(e, s.id)}
+                      className="px-3 py-3 text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
+                      title="삭제"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

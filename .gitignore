@@ -1,6 +1,10 @@
-# Environment
+# Environment — never commit real secrets
 .env
+.env.local
 *.env.local
+**/.env
+**/.env.local
+**/secrets.json
 
 # Python
 __pycache__/

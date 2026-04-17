@@ -12,6 +12,7 @@ export interface PaperDecision {
 interface Props {
   papers: PaperDecision[];
   query?: string;
+  isProcessing?: boolean;
 }
 
 const stageLabel: Record<string, string> = {
@@ -35,7 +36,7 @@ function highlight(text: string, query: string) {
   );
 }
 
-export default function PaperList({ papers, query = '' }: Props) {
+export default function PaperList({ papers, query = '', isProcessing = false }: Props) {
   const [stageFilter, setStageFilter] = useState<string>('all');
   const [decisionFilter, setDecisionFilter] = useState<string>('all');
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -57,10 +58,49 @@ export default function PaperList({ papers, query = '' }: Props) {
     return acc;
   }, {} as Record<string, number>);
 
+  // Per-stage include/exclude breakdown
+  const stageBreakdown = stageOrder.reduce((acc, s) => {
+    const stagePapers = papers.filter(p => p.stage === s);
+    acc[s] = {
+      total: stagePapers.length,
+      include: stagePapers.filter(p => p.decision === 'INCLUDE').length,
+      exclude: stagePapers.filter(p => p.decision === 'EXCLUDE').length,
+    };
+    return acc;
+  }, {} as Record<string, { total: number; include: number; exclude: number }>);
+
   return (
     <div className="flex gap-4">
+      {/* 진행 중 배너 */}
+      {isProcessing && (
+        <div className="absolute top-0 left-0 right-0 bg-blue-50 border-b border-blue-100 px-4 py-1.5 text-xs text-blue-600 flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse inline-block" />
+          AI가 논문을 심사하고 있습니다... ({papers.length}건 처리됨)
+        </div>
+      )}
+
       {/* 좌측 필터 패널 */}
       <aside className="w-44 flex-shrink-0 space-y-5">
+        {/* 단계별 포함/제외 통계 */}
+        <div>
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2">단계별 결과</p>
+          <div className="space-y-2">
+            {stageOrder.map(s => {
+              const b = stageBreakdown[s];
+              if (!b || b.total === 0) return null;
+              return (
+                <div key={s} className="text-[10px] rounded-lg bg-gray-50 px-2 py-1.5">
+                  <p className="font-semibold text-gray-500 mb-1">{stageLabel[s]}</p>
+                  <div className="flex gap-2">
+                    <span className="text-green-600">✓ {b.include}건</span>
+                    <span className="text-red-400">✕ {b.exclude}건</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* PRISMA 단계 필터 */}
         <div>
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2">PRISMA 단계</p>

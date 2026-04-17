@@ -6,6 +6,7 @@ export type PrismaStage = 'identification' | 'screening' | 'eligibility' | 'incl
 
 export interface PrismaStats {
   identified: number;
+  fetched?: number;
   screened: number;
   eligible: number;
   included: number;
@@ -94,7 +95,7 @@ export default function PrismaInteractiveFlow({ stats, completedStages, onRunSta
   return (
     <div className="space-y-1">
       <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-3">
-        PRISMA 2020 Flow
+        PRISMA Flow
       </p>
 
       {STAGE_INFO.map((stage, i) => {
@@ -139,9 +140,16 @@ export default function PrismaInteractiveFlow({ stats, completedStages, onRunSta
                     <span className="text-[10px] text-green-600">✓</span>
                   )}
                 </div>
-                <span className={`text-lg font-bold tabular-nums ${isDone || isRunning ? stage.color.text : 'text-gray-300'}`}>
-                  {count}
-                </span>
+                <div className="text-right">
+                  <span className={`text-lg font-bold tabular-nums ${isDone || isRunning ? stage.color.text : 'text-gray-300'}`}>
+                    {stage.key === 'identification' && stats.identified > 0
+                      ? stats.identified.toLocaleString()
+                      : count}
+                  </span>
+                  {stage.key === 'identification' && stats.fetched !== undefined && stats.fetched > 0 && stats.fetched !== stats.identified && (
+                    <p className="text-[9px] text-gray-400 leading-none mt-0.5">수집 {stats.fetched}건</p>
+                  )}
+                </div>
               </div>
 
               <p className="text-[10px] text-gray-400 mb-2">{stage.description}</p>

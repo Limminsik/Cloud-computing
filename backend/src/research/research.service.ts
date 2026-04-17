@@ -79,6 +79,84 @@ export class ResearchService {
     });
   }
 
+  async saveIdentifiedPapers(id: string, papers: { title: string; authors?: string[]; year?: number; url?: string; abstract?: string; venue?: string }[], prismaStats?: any) {
+    const session = await this.prisma.researchSession.findUnique({ where: { id } });
+    if (!session) throw new NotFoundException(`Session ${id} not found`);
+
+    // Replace existing identified papers only (keep screened/eligible/included)
+    await this.prisma.paper.deleteMany({ where: { sessionId: id, prismaStage: 'identified' } });
+    if (papers.length > 0) {
+      await this.prisma.paper.createMany({
+        data: papers.map(p => ({
+          sessionId: id,
+          title: p.title,
+          authors: p.authors || [],
+          year: p.year ?? null,
+          url: p.url ?? null,
+          abstract: p.abstract ?? null,
+          venue: p.venue ?? null,
+          prismaStage: 'identified',
+          decision: null,
+          reason: null,
+        })),
+      });
+    }
+    if (prismaStats) {
+      await this.prisma.researchSession.update({ where: { id }, data: { prismaStats } });
+    }
+    return { saved: papers.length };
+  }
+
+  async saveStageResults(
+    id: string,
+    stage: 'screened' | 'eligible' | 'included',
+    papers: any[],
+    prismaStats?: any,
+  ) {
+    const session = await this.prisma.researchSession.findUnique({ where: { id } });
+    if (!session) throw new NotFoundException(`Session ${id} not found`);
+
+    // Replace papers for this stage only
+    await this.prisma.paper.deleteMany({ where: { sessionId: id, prismaStage: stage } });
+    if (papers.length > 0) {
+      await this.prisma.paper.createMany({
+        data: papers.map(p => ({
+          sessionId: id,
+          title: p.title,
+          authors: p.authors || [],
+          year: p.year ?? null,
+          url: p.url ?? null,
+          abstract: p.abstract ?? null,
+          venue: p.venue ?? null,
+          prismaStage: stage,
+          decision: p.decision ?? null,
+          reason: p.reason ?? null,
+          extractedData: p.extracted_data ?? null,
+        })),
+      });
+    }
+    // Update prismaStats and set stage-based status
+    const stageStatusMap: Record<string, string> = {
+      screened: 'screening_done',
+      eligible: 'eligibility_done',
+      included: 'inclusion_done',
+    };
+    await this.prisma.researchSession.update({
+      where: { id },
+      data: {
+        ...(prismaStats ? { prismaStats } : {}),
+        status: stageStatusMap[stage] || 'running',
+      },
+    });
+    return { saved: papers.length, stage };
+  }
+
+  async deleteSession(id: string) {
+    const session = await this.prisma.researchSession.findUnique({ where: { id } });
+    if (!session) throw new NotFoundException(`Session ${id} not found`);
+    await this.prisma.researchSession.delete({ where: { id } });
+  }
+
   async runStage(id: string, stage: 'screening' | 'eligibility' | 'inclusion', criteria: string[]) {
     const session = await this.prisma.researchSession.findUnique({ where: { id } });
     if (!session) throw new NotFoundException(`Session ${id} not found`);
@@ -98,9 +176,9 @@ export class ResearchService {
     const session = await this.prisma.researchSession.findUnique({ where: { id } });
     if (!session) throw new NotFoundException(`Session ${id} not found`);
 
-    // Upsert papers
+    // Upsert included papers only — do NOT wipe intermediate stage papers
     if (dto.included_papers?.length) {
-      await this.prisma.paper.deleteMany({ where: { sessionId: id } });
+      await this.prisma.paper.deleteMany({ where: { sessionId: id, prismaStage: 'included' } });
       await this.prisma.paper.createMany({
         data: dto.included_papers.map((p) => ({
           sessionId: id,

@@ -4,8 +4,10 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import AgentStatusCards, { AgentState, AgentStatus } from '@/components/AgentStatusCards';
+import HeaderSearchBar from '@/components/HeaderSearchBar';
 import LiveLog, { LogEntry } from '@/components/LiveLog';
 import PaperList, { PaperDecision } from '@/components/PaperList';
+import IdentifiedPaperList, { IdentifiedPaper } from '@/components/IdentifiedPaperList';
 import ReviewReport from '@/components/ReviewReport';
 import PrismaInteractiveFlow, { PrismaStage } from '@/components/PrismaInteractiveFlow';
 import { getSSEUrl } from '@/lib/api';
@@ -20,7 +22,7 @@ const INITIAL_AGENTS: AgentState[] = [
   { name: 'WriterAgent',      label: 'Writer',      stage: 'Synthesis',      status: 'waiting', message: '' },
 ];
 
-const INITIAL_STATS = { identified: 0, screened: 0, eligible: 0, included: 0 };
+const INITIAL_STATS = { identified: 0, fetched: 0, screened: 0, eligible: 0, included: 0 };
 
 let logIdCounter = 0;
 function makeLog(event: Record<string, unknown>): LogEntry {
@@ -45,7 +47,8 @@ export default function ResultsPage() {
   const [connectionError, setConnectionError] = useState('');
   const [showLog, setShowLog]     = useState(false);
   const [query, setQuery]         = useState('');
-  const [activeTab, setActiveTab] = useState<'papers' | 'report'>('papers');
+  const [activeTab, setActiveTab] = useState<'identified' | 'papers' | 'report'>('identified');
+  const [identifiedPapers, setIdentifiedPapers] = useState<IdentifiedPaper[]>([]);
   const [completedStages, setCompletedStages] = useState<Set<PrismaStage>>(new Set());
   const [activeStage, setActiveStage] = useState<PrismaStage | null>(null);
 
@@ -63,21 +66,64 @@ export default function ResultsPage() {
       .then(data => {
         if (data.query) setQuery(data.query);
         if (data.prismaStats) setStats(data.prismaStats);
-        if (data.status === 'done') {
+
+        // Restore identified papers (always available once identification is done)
+        const allPapers: typeof data.papers = data.papers || [];
+        const identified = allPapers.filter((p: any) => p.prismaStage === 'identified');
+        if (identified.length > 0) {
+          setIdentifiedPapers(identified.map((p: any) => ({
+            title: p.title,
+            authors: p.authors || [],
+            year: p.year,
+            url: p.url,
+            abstract: p.abstract || '',
+            venue: p.venue || '',
+          })));
+          setCompletedStages(prev => new Set([...prev, 'identification']));
+          setActiveTab('identified');
+        }
+
+        // Restore intermediate stage papers (screened/eligible/included) regardless of status
+        const decidedPapers = allPapers.filter((p: any) => p.prismaStage !== 'identified');
+        if (decidedPapers.length > 0) {
+          setPapers(decidedPapers.map((p: any) => ({
+            title: p.title,
+            decision: p.decision || 'EXCLUDE',
+            reason: p.reason || '',
+            stage: p.prismaStage || 'screened',
+          })));
+          // Mark completed stages based on what's in DB
+          const dbStages = new Set<PrismaStage>(['identification']);
+          if (allPapers.some((p: any) => p.prismaStage === 'screened')) dbStages.add('screening');
+          if (allPapers.some((p: any) => p.prismaStage === 'eligible')) dbStages.add('eligibility');
+          if (allPapers.some((p: any) => p.prismaStage === 'included')) dbStages.add('inclusion');
+          setCompletedStages(prev => new Set([...prev, ...dbStages]));
+          setActiveTab('papers');
+        }
+
+        // Restore agent status based on session status
+        const status = data.status as string;
+        const doneAgents: Record<string, string[]> = {
+          running:          [],
+          screening_done:   ['SearchAgent', 'ScreeningAgent'],
+          eligibility_done: ['SearchAgent', 'ScreeningAgent', 'EligibilityAgent'],
+          inclusion_done:   ['SearchAgent', 'ScreeningAgent', 'EligibilityAgent', 'ExtractionAgent'],
+          done:             ['SearchAgent', 'ScreeningAgent', 'EligibilityAgent', 'ExtractionAgent', 'WriterAgent'],
+        };
+        const completedAgents = doneAgents[status] || [];
+        if (completedAgents.length > 0) {
+          setAgents(prev => prev.map(a => ({
+            ...a,
+            status: completedAgents.includes(a.name) ? 'done' as AgentStatus : a.status,
+          })));
+        }
+
+        if (status === 'done') {
           setDone(true);
           setCompletedStages(new Set(['identification', 'screening', 'eligibility', 'inclusion']));
-          if (data.papers?.length) {
-            setPapers(data.papers.map((p: { title: string; decision?: string; reason?: string; prismaStage?: string }) => ({
-              title: p.title,
-              decision: p.decision || 'EXCLUDE',
-              reason: p.reason || '',
-              stage: p.prismaStage || 'identified',
-            })));
-          }
           if (data.report?.content) {
             setReport(data.report.content);
           }
-          setAgents(prev => prev.map(a => ({ ...a, status: 'done' as AgentStatus })));
         }
       })
       .catch(() => {});
@@ -105,13 +151,23 @@ export default function ResultsPage() {
       if (type === 'error'          && agent) updateAgent(agent, 'error',   event.message as string);
       if (type === 'prisma_update') setStats(event.counts as typeof INITIAL_STATS);
 
+      if (type === 'identified_papers') {
+        setIdentifiedPapers(event.papers as IdentifiedPaper[]);
+        setActiveTab('identified');
+      }
+
       if (type === 'paper_decision') {
-        setPapers(prev => [...prev, {
-          title:    event.title    as string,
-          decision: event.decision as string,
-          reason:   event.reason   as string,
-          stage:    event.stage    as string,
-        }]);
+        setPapers(prev => {
+          const next = [...prev, {
+            title:    event.title    as string,
+            decision: event.decision as string,
+            reason:   event.reason   as string,
+            stage:    event.stage    as string,
+          }];
+          return next;
+        });
+        // Auto-switch to papers tab on first decision
+        setActiveTab(prev => prev === 'identified' ? 'papers' : prev);
       }
 
       // 단계 완료 이벤트
@@ -176,10 +232,7 @@ export default function ResultsPage() {
           <span style={{ color: '#6DBE45' }}>on</span>
           <span style={{ color: '#000' }}> Scholar</span>
         </Link>
-        <div className="flex items-center border border-gray-300 rounded-full px-4 py-1.5 flex-1 max-w-2xl bg-white shadow-sm">
-          <img src="/search-icon.png" alt="" className="w-5 h-5 mr-2 flex-shrink-0 object-cover" />
-          <span className="text-sm text-gray-700 truncate">{query || sessionId}</span>
-        </div>
+        <HeaderSearchBar defaultValue={query || ''} />
         <div className="flex items-center gap-2 ml-auto">
           {done
             ? <span className="badge-include text-xs px-3 py-1">분석 완료</span>
@@ -191,12 +244,21 @@ export default function ResultsPage() {
           >
             Live Log
           </button>
-          {done && report && (
-            <div className="flex border border-gray-200 rounded-full overflow-hidden text-xs">
-              <button onClick={() => setActiveTab('papers')} className={`px-3 py-1 transition-colors ${activeTab === 'papers' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>논문</button>
+          <div className="flex border border-gray-200 rounded-full overflow-hidden text-xs">
+            {identifiedPapers.length > 0 && (
+              <button onClick={() => setActiveTab('identified')} className={`px-3 py-1 transition-colors ${activeTab === 'identified' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                식별 ({identifiedPapers.length})
+              </button>
+            )}
+            {(papers.length > 0 || completedStages.has('identification')) && (
+              <button onClick={() => setActiveTab('papers')} className={`px-3 py-1 transition-colors ${activeTab === 'papers' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                심사 {papers.length > 0 ? `(${papers.length})` : ''}
+              </button>
+            )}
+            {report && (
               <button onClick={() => setActiveTab('report')} className={`px-3 py-1 transition-colors ${activeTab === 'report' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>리포트</button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -214,15 +276,34 @@ export default function ResultsPage() {
         <main className="flex-1 px-6 py-5 min-w-0 space-y-4">
           {showLog && <div className="card"><LiveLog logs={logs} /></div>}
 
+          {activeTab === 'identified' && (
+            identifiedPapers.length === 0
+              ? <div className="text-center py-20 text-gray-300 text-sm">AI 에이전트가 논문을 탐색하고 있습니다...</div>
+              : <IdentifiedPaperList papers={identifiedPapers} query={query} />
+          )}
+
           {activeTab === 'papers' && (
-            papers.length === 0 && !done
-              ? <div className="text-center py-20 text-gray-300 text-sm">AI 에이전트가 논문을 분석하고 있습니다...</div>
-              : <PaperList papers={papers} query={query} />
+            papers.length === 0
+              ? (
+                <div className="text-center py-20 text-gray-300 text-sm space-y-2">
+                  {activeStage
+                    ? <>
+                        <div className="flex justify-center mb-3">
+                          <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping inline-block" />
+                        </div>
+                        <p className="text-blue-400 text-sm">AI가 논문을 심사하고 있습니다...</p>
+                        <p className="text-gray-300 text-xs">첫 번째 결과가 곧 표시됩니다</p>
+                      </>
+                    : <p>Screening 단계를 실행해주세요.</p>
+                  }
+                </div>
+              )
+              : <PaperList papers={papers} query={query} isProcessing={!done && !!activeStage} />
           )}
 
           {activeTab === 'report' && report && <ReviewReport content={report} />}
 
-          {done && !report && (
+          {done && !report && activeTab === 'report' && (
             <div className="text-center py-12 text-gray-400 text-sm">보고서를 불러오는 중...</div>
           )}
         </main>

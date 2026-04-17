@@ -1,113 +1,219 @@
-"""Agent 3: Eligibility Agent (Claude) — PRISMA Eligibility stage (full-text)."""
+"""Agent 3: Eligibility Agent (Claude) — PRISMA Eligibility stage.
 
-import json
+실제 논문 전문(full-text)을 여러 경로로 확보 후 Claude가 읽고 판단.
+전문 확보 불가 시 초록으로 fallback.
+"""
+
 import asyncio
+import json
 from typing import Any, Callable, Coroutine
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
 
 from state import ReviewState, PaperInfo
 from config import ANTHROPIC_API_KEY, REVIEW_MODEL
-from prompts import ELIGIBILITY_PROMPT
+from utils.fetch_fulltext import fetch_fulltext
+
+ELIGIBILITY_PROMPT = """You are a senior systematic review methodologist performing PRISMA 2020 eligibility assessment.
+
+## Research Question
+{query}
+
+## Eligibility Criteria
+{criteria_block}
+
+## Paper Under Review
+Title: {title}
+Authors: {authors}
+Year: {year}
+Venue: {venue}
+
+## Available Content
+{content}
+
+## Task
+Assess eligibility based on available content.
+
+IMPORTANT RULES:
+- If only abstract is available (no full text), apply LENIENT criteria — give benefit of the doubt.
+  INCLUDE if the title/abstract suggests relevance, even if details are missing.
+- If full text is available, apply criteria carefully but err on the side of inclusion.
+- Only EXCLUDE when the paper is CLEARLY irrelevant or explicitly violates a stated criterion.
+- Default to INCLUDE when uncertain — false negatives (missing relevant papers) are worse than false positives.
+
+Dimensions to evaluate:
+1. **Relevance** — Does the paper relate to the research question?
+2. **Study design** — Is the methodology identifiable?
+3. **Population/Scope** — Is the target population appropriate?
+4. **Outcomes** — Are outcomes potentially relevant?
+5. **Language** — Is the paper readable (English or Korean)?
+
+## Output (JSON only)
+{{
+  "decision": "INCLUDE" or "EXCLUDE",
+  "reason": "<1–2 sentences. If abstract-only, note that full-text was unavailable>",
+  "study_design": "<RCT | Cohort | Cross-sectional | Case-control | Systematic Review | Meta-analysis | Other | Unknown>",
+  "confidence": "high" | "moderate" | "low",
+  "full_text_available": true or false
+}}
+
+Return ONLY the JSON object. No markdown, no extra text.
+"""
+
+
+async def _assess_one(
+    llm: ChatAnthropic,
+    paper: PaperInfo,
+    query: str,
+    criteria_block: str,
+) -> dict:
+    """Fetch full text (using all available URL fields) then ask Claude."""
+    abstract = paper.get("abstract", "") or ""
+
+    # Pass full paper dict so fetch_fulltext can try all URL strategies
+    full_text = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: fetch_fulltext(dict(paper))
+    )
+
+    if full_text:
+        content = f"[FULL TEXT RETRIEVED]\n\n{full_text}"
+        full_text_available = True
+    else:
+        content = f"[ABSTRACT ONLY — full text not accessible]\n\n{abstract}"
+        full_text_available = False
+
+    prompt = ELIGIBILITY_PROMPT.format(
+        query=query,
+        criteria_block=criteria_block,
+        title=paper["title"],
+        authors=", ".join(paper.get("authors", [])[:5]) or "Unknown",
+        year=paper.get("year") or "Unknown",
+        venue=paper.get("venue", "") or "",
+        content=content,
+    )
+
+    response = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda p=prompt: llm.invoke([HumanMessage(content=p)])
+    )
+    raw = response.content.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    raw = raw.strip()
+
+    result = json.loads(raw)
+    result["full_text_available"] = result.get("full_text_available", full_text_available)
+    return result
 
 
 async def eligibility_agent(
     state: ReviewState,
     emit: Callable[[dict], Coroutine[Any, Any, None]],
 ) -> dict:
-    """Full-text eligibility assessment applying stricter PRISMA criteria."""
+    """Full-text eligibility assessment — concurrent batches with Claude."""
 
-    papers = state["screened_papers"]
+    papers = state.get("screened_papers", [])
     await emit({
         "type": "agent_start",
         "agent": "EligibilityAgent",
-        "message": f"{len(papers)}건 논문 적격성 평가(풀텍스트) 시작...",
+        "message": f"{len(papers)}건 논문 전문 확보 및 적격성 평가 시작...",
     })
 
     if not papers:
         await emit({"type": "agent_complete", "agent": "EligibilityAgent", "message": "평가할 논문 없음"})
-        return {"eligible_papers": [], "included_papers": [], "logs": ["[EligibilityAgent] 평가할 논문 없음"]}
+        return {
+            "eligible_papers": [],
+            "included_papers": [],
+            "prisma_stats": state.get("prisma_stats", {}),
+            "logs": ["[EligibilityAgent] 평가할 논문 없음"],
+        }
 
     llm = ChatAnthropic(
         model=REVIEW_MODEL,
         anthropic_api_key=ANTHROPIC_API_KEY,
         temperature=0,
-        max_tokens=4096,
+        max_tokens=1024,
     )
 
-    inclusion_str = "\n".join(f"- {c}" for c in state["inclusion_criteria"])
-    exclusion_str = "\n".join(f"- {c}" for c in state["exclusion_criteria"])
+    # Build criteria block
+    inclusion = state.get("inclusion_criteria", [])
+    exclusion = state.get("exclusion_criteria", [])
+    criteria_lines = []
+    if inclusion:
+        criteria_lines.append("포함 기준:")
+        criteria_lines.extend(f"  - {c}" for c in inclusion)
+    if exclusion:
+        criteria_lines.append("제외 기준:")
+        criteria_lines.extend(f"  - {c}" for c in exclusion)
+    criteria_block = "\n".join(criteria_lines) if criteria_lines else "별도 기준 없음 — 연구 질문 적합성과 방법론적 엄밀성으로 판단"
 
-    BATCH = 15
-    all_decisions: dict[str, dict] = {}
+    query = state.get("query", "")
+    eligible: list[PaperInfo] = []
+    included: list[PaperInfo] = []
+    full_text_count = 0
 
-    for i in range(0, len(papers), BATCH):
-        batch = papers[i: i + BATCH]
-        papers_json = json.dumps(
-            [{"title": p["title"], "abstract": p.get("abstract", ""), "venue": p.get("venue", ""), "year": p.get("year")} for p in batch],
-            ensure_ascii=False,
-            indent=2,
-        )
-        prompt = ELIGIBILITY_PROMPT.format(
-            query=state["query"],
-            inclusion_criteria=inclusion_str,
-            exclusion_criteria=exclusion_str,
-            papers=papers_json,
-        )
+    CONCURRENT = 5
+    for batch_start in range(0, len(papers), CONCURRENT):
+        batch = papers[batch_start: batch_start + CONCURRENT]
+        batch_end = min(batch_start + CONCURRENT, len(papers))
 
         await emit({
             "type": "agent_progress",
             "agent": "EligibilityAgent",
-            "message": f"적격성 평가 진행 ({i + 1}–{min(i + BATCH, len(papers))}/{len(papers)}건)...",
+            "message": f"전문 확보 및 평가 중 ({batch_start + 1}–{batch_end} / {len(papers)}건)...",
         })
 
-        try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda p=prompt: llm.invoke([HumanMessage(content=p)])
-            )
-            raw = response.content.strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            raw = raw.strip()
-            decisions = json.loads(raw)
-            for d in decisions:
-                all_decisions[d["title"]] = d
-        except Exception as e:
-            await emit({"type": "error", "agent": "EligibilityAgent", "message": f"평가 오류: {str(e)}"})
+        tasks = [_assess_one(llm, p, query, criteria_block) for p in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    eligible: list[PaperInfo] = []
-    included: list[PaperInfo] = []
+        for p, result in zip(batch, results):
+            if isinstance(result, Exception):
+                decision = "INCLUDE"  # on error, be conservative — include
+                reason = f"평가 오류 → 보수적 포함 처리: {result}"
+                study_design, confidence, ft = "Unknown", "low", False
+            else:
+                decision = result.get("decision", "INCLUDE")
+                reason = result.get("reason", "")
+                study_design = result.get("study_design", "Unknown")
+                confidence = result.get("confidence", "low")
+                ft = result.get("full_text_available", False)
+                if ft:
+                    full_text_count += 1
 
-    for p in papers:
-        decision_info = all_decisions.get(p["title"], {"decision": "EXCLUDE", "reason": "평가 결과 없음"})
-        decision = decision_info.get("decision", "EXCLUDE")
-        reason = decision_info.get("reason", "")
+            label = "전문" if ft else "초록"
+            full_reason = f"[{study_design}][신뢰도:{confidence}][{label}] {reason}"
 
-        updated = {**p, "decision": decision, "reason": reason, "prisma_stage": "eligible"}
-        eligible.append(updated)
+            updated: PaperInfo = {
+                **p,
+                "decision": decision,
+                "reason": full_reason,
+                "prisma_stage": "eligible",
+            }
+            eligible.append(updated)
 
-        await emit({
-            "type": "paper_decision",
-            "title": p["title"],
-            "decision": decision,
-            "reason": reason,
-            "stage": "eligibility",
-        })
+            await emit({
+                "type": "paper_decision",
+                "title": p["title"],
+                "decision": decision,
+                "reason": full_reason,
+                "stage": "eligibility",
+            })
 
-        if decision == "INCLUDE":
-            included_paper = {**updated, "prisma_stage": "included"}
-            included.append(included_paper)
+            if decision == "INCLUDE":
+                included.append({**updated, "prisma_stage": "included"})
 
-    stats = {**state["prisma_stats"], "eligible": len(eligible), "included": len(included)}
     excluded_count = len(eligible) - len(included)
+    stats = {**state.get("prisma_stats", {}), "eligible": len(eligible), "included": len(included)}
 
     await emit({
         "type": "agent_complete",
         "agent": "EligibilityAgent",
-        "message": f"적격성 평가 완료: {len(papers)}건 → {len(included)}건 최종 포함 ({excluded_count}건 제외)",
+        "message": (
+            f"적격성 평가 완료: {len(papers)}건 → {len(included)}건 포함 / {excluded_count}건 제외 "
+            f"(전문 확보 {full_text_count}건 / 초록 {len(papers) - full_text_count}건)"
+        ),
     })
     await emit({"type": "prisma_update", "counts": stats})
 
@@ -115,5 +221,8 @@ async def eligibility_agent(
         "eligible_papers": eligible,
         "included_papers": included,
         "prisma_stats": stats,
-        "logs": [f"[EligibilityAgent] {len(included)}건 최종 포함"],
+        "logs": [
+            f"[EligibilityAgent] {len(papers)}건 평가 → {len(included)}건 포함",
+            f"전문 확보: {full_text_count}건 / 초록 fallback: {len(papers) - full_text_count}건",
+        ],
     }

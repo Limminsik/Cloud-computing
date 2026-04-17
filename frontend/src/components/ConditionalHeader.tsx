@@ -12,7 +12,7 @@ export default function ConditionalHeader() {
 
   return (
     <header className="flex items-center justify-between px-6 py-3">
-      <div className="flex items-center">
+      <a href="https://www.gachon.ac.kr/sites/kor/index..do" target="_blank" rel="noopener noreferrer">
         <Image
           src="/gachon-logo.png"
           alt="가천대학교"
@@ -21,7 +21,7 @@ export default function ConditionalHeader() {
           className="object-contain"
           priority
         />
-      </div>
+      </a>
       <nav className="flex items-center gap-4 text-sm text-gray-600">
         <HistorySidebar />
         <a href="#" className="hover:text-blue-700">내 서재</a>
