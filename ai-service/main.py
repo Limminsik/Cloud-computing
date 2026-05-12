@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -13,6 +14,9 @@ from sse_starlette.sse import EventSourceResponse
 from config import NESTJS_CALLBACK_URL
 from state import ReviewState
 from graph.pipeline import prisma_graph, get_config, register_emitter, unregister_emitter
+from agents.search_agent import generate_search_terms
+from sources.pubmed import search_pubmed
+from sources.semantic_scholar import search_semantic_scholar
 
 logger = logging.getLogger("main")
 
@@ -45,12 +49,18 @@ app.add_middleware(
 
 # ── Request models ─────────────────────────────────────────────────────────────
 
+class GenerateTermsRequest(BaseModel):
+    research_question: str
+    keywords: list[str] = []
+
 class PipelineRequest(BaseModel):
     session_id: str
-    query: str
-    search_terms: list[str]
-    inclusion_criteria: list[str]
-    exclusion_criteria: list[str]
+    research_question: str
+    keywords: list[str] = []              # 사용자가 직접 입력한 연구 키워드
+    boolean_query: str = ""               # generate-terms에서 확정된 Boolean query
+    search_terms: list[str] = []
+    inclusion_criteria: list[str] = []
+    exclusion_criteria: list[str] = []
 
 class StageRequest(BaseModel):
     session_id: str
@@ -227,27 +237,84 @@ async def health():
     return {"status": "ok", "service": "ai-service"}
 
 
+class PreviewSearchRequest(BaseModel):
+    boolean_query: str
+    research_question: str = ""
+
+
+@app.post("/pipeline/preview-search")
+async def preview_search(body: PreviewSearchRequest):
+    """Count-only search across all DBs — no paper fetch, just totals."""
+    plain_query = re.sub(r'\[MeSH\]', '', body.boolean_query).strip() or body.research_question
+
+    async def _count_pubmed():
+        try:
+            _, total = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: search_pubmed(plain_query, max_results=1)
+            )
+            return total
+        except Exception:
+            return None
+
+    async def _count_semantic_scholar():
+        try:
+            _, total = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: search_semantic_scholar(plain_query, max_results=1)
+            )
+            return total
+        except Exception:
+            return None
+
+    pubmed_total, s2_total = await asyncio.gather(
+        _count_pubmed(), _count_semantic_scholar()
+    )
+
+    return {
+        "status": "ok",
+        "query": plain_query,
+        "counts": {
+            "pubmed": pubmed_total,
+            "semantic_scholar": s2_total,
+        }
+    }
+
+
+@app.post("/pipeline/generate-terms")
+async def generate_terms_endpoint(body: GenerateTermsRequest):
+    """Phase 1: Research Question + Keywords → PICO + MeSH + Boolean query."""
+    try:
+        result = await generate_search_terms(body.research_question, body.keywords)
+        return {"status": "ok", "terms": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "terms": None}
+
+
 @app.post("/pipeline/start", response_model=PipelineResponse)
 async def start_pipeline(body: PipelineRequest):
     """Start the pipeline — runs Search Agent then pauses before Screening."""
     session_id = body.session_id
     _get_or_create_queue(session_id)
 
+    # boolean_query가 넘어온 경우 generated_search_terms에 미리 채워서 LLM 재생성 건너뜀
+    preset_terms = {"boolean_query": body.boolean_query} if body.boolean_query else None
+
     initial_state: ReviewState = {
-        "session_id":          session_id,
-        "query":               body.query,
-        "search_terms":        body.search_terms,
-        "inclusion_criteria":  body.inclusion_criteria,
-        "exclusion_criteria":  body.exclusion_criteria,
-        "identified_papers":   [],
-        "screened_papers":     [],
-        "eligible_papers":     [],
-        "included_papers":     [],
-        "prisma_stats":        {"identified": 0, "screened": 0, "eligible": 0, "included": 0},
-        "review_report":       None,
-        "logs":                [],
-        "status":              "running",
-        "error":               None,
+        "session_id":              session_id,
+        "research_question":       body.research_question,
+        "keywords":                body.keywords,
+        "search_terms":            [],
+        "generated_search_terms":  preset_terms,
+        "inclusion_criteria":      body.inclusion_criteria,
+        "exclusion_criteria":      body.exclusion_criteria,
+        "identified_papers":       [],
+        "screened_papers":         [],
+        "eligible_papers":         [],
+        "included_papers":         [],
+        "prisma_stats":            {"identified": 0, "screened": 0, "eligible": 0, "included": 0},
+        "review_report":           None,
+        "logs":                    [],
+        "status":                  "running",
+        "error":                   None,
     }
 
     asyncio.create_task(_run_graph(session_id, initial_state=initial_state))

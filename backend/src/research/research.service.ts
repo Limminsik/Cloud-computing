@@ -21,6 +21,8 @@ export class ResearchService {
     const session = await this.prisma.researchSession.create({
       data: {
         query: dto.query,
+        keywords: dto.keywords || [],
+        booleanQuery: dto.booleanQuery || '',
         searchTerms: dto.searchTerms,
         inclusionCriteria: dto.inclusionCriteria,
         exclusionCriteria: dto.exclusionCriteria,
@@ -34,8 +36,10 @@ export class ResearchService {
       await firstValueFrom(
         this.httpService.post(`${aiServiceUrl}/pipeline/start`, {
           session_id: session.id,
-          query: dto.query,
-          search_terms: dto.searchTerms,
+          research_question: dto.query,
+          keywords: dto.keywords || [],
+          boolean_query: dto.booleanQuery || '',
+          search_terms: [],
           inclusion_criteria: dto.inclusionCriteria,
           exclusion_criteria: dto.exclusionCriteria,
         }),

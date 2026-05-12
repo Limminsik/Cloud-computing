@@ -5,6 +5,7 @@ Returns real abstracts + open access PDF links + citation counts.
 Docs: https://api.semanticscholar.org/api-docs/
 """
 
+import time
 import httpx
 
 BASE = "https://api.semanticscholar.org/graph/v1"
@@ -39,18 +40,25 @@ def search_semantic_scholar(query: str, max_results: int = 200) -> tuple[list[di
 
     while len(all_papers) < max_results:
         limit = min(PAGE_SIZE, max_results - len(all_papers))
-        resp = httpx.get(
-            f"{BASE}/paper/search",
-            params={
-                "query": query,
-                "fields": FIELDS,
-                "limit": limit,
-                "offset": offset,
-            },
-            headers=HEADERS,
-            timeout=20,
-        )
-        resp.raise_for_status()
+        for attempt in range(3):
+            resp = httpx.get(
+                f"{BASE}/paper/search",
+                params={
+                    "query": query,
+                    "fields": FIELDS,
+                    "limit": limit,
+                    "offset": offset,
+                },
+                headers=HEADERS,
+                timeout=30,
+            )
+            if resp.status_code == 429:
+                time.sleep(2 ** attempt)
+                continue
+            resp.raise_for_status()
+            break
+        else:
+            raise httpx.HTTPStatusError("429 after retries", request=resp.request, response=resp)
         data = resp.json()
 
         if total is None:

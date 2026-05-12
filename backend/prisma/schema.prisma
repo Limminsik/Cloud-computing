@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -10,6 +11,8 @@ datasource db {
 model ResearchSession {
   id                String   @id @default(cuid())
   query             String
+  keywords          String[]
+  booleanQuery      String   @default("")
   searchTerms       String[]
   inclusionCriteria String[]
   exclusionCriteria String[]

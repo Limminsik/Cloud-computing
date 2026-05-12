@@ -1,16 +1,26 @@
-import { IsString, IsArray, ArrayNotEmpty } from 'class-validator';
+import { IsString, IsArray, IsOptional } from 'class-validator';
 
 export class CreateResearchDto {
   @IsString()
   query: string;
 
   @IsArray()
-  @ArrayNotEmpty()
-  searchTerms: string[];
+  @IsOptional()
+  keywords: string[] = [];
+
+  @IsString()
+  @IsOptional()
+  booleanQuery?: string;
 
   @IsArray()
-  inclusionCriteria: string[];
+  @IsOptional()
+  searchTerms: string[] = [];
 
   @IsArray()
-  exclusionCriteria: string[];
+  @IsOptional()
+  inclusionCriteria: string[] = [];
+
+  @IsArray()
+  @IsOptional()
+  exclusionCriteria: string[] = [];
 }
