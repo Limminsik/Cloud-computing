@@ -3,12 +3,12 @@
 import json
 import asyncio
 from typing import Any, Callable, Coroutine
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
 
 from state import ReviewState
-from config import ANTHROPIC_API_KEY, REVIEW_MODEL
+from config import WRITER_MODEL
 from prompts import WRITER_PROMPT
+from utils.llm_factory import get_llm
 
 
 async def writer_agent(
@@ -26,12 +26,7 @@ async def writer_agent(
         "message": f"{len(papers)}건 논문을 기반으로 리뷰 논문 작성 시작...",
     })
 
-    llm = ChatAnthropic(
-        model=REVIEW_MODEL,
-        anthropic_api_key=ANTHROPIC_API_KEY,
-        temperature=0.3,
-        max_tokens=8192,
-    )
+    llm = get_llm(WRITER_MODEL, temperature=0.3, max_tokens=8192)
 
     papers_summary = []
     for p in papers:
@@ -49,7 +44,7 @@ async def writer_agent(
     papers_json = json.dumps(papers_summary, ensure_ascii=False, indent=2)
 
     prompt = WRITER_PROMPT.format(
-        query=state["query"],
+        query=state.get("research_question") or state.get("query", ""),
         identified=stats.get("identified", 0),
         screened=stats.get("screened", 0),
         eligible=stats.get("eligible", 0),

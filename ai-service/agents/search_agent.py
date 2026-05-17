@@ -20,11 +20,11 @@ try:
 except ImportError:
     HAS_SERPAPI = False
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
 from state import ReviewState, PaperInfo, GeneratedSearchTerms
 from config import SERPAPI_API_KEY, SEARCH_MODEL, MAX_RESULTS_PER_SOURCE, SCHOLAR_PAGE_SIZE, SCHOLAR_MAX_PAGES
+from utils.llm_factory import get_llm
 from prompts import SEARCH_TERMS_PROMPT
 from sources.pubmed import search_pubmed
 from sources.semantic_scholar import search_semantic_scholar
@@ -89,33 +89,60 @@ def _serpapi_item_to_paper(item: dict) -> PaperInfo:
     if not isinstance(pub_info, dict):
         pub_info = {}
     summary = pub_info.get("summary", "")
+
+    # Use only the direct link — result_id is a Scholar-internal ID, not a paper URL
+    link = item.get("link")
+    # If link looks like a Google redirect or Scholar internal page, discard it
+    if link and ("google.com/scholar" in link or "scholar.google" in link):
+        link = None
+
+    # Try to extract DOI from resources
+    doi_url = None
+    for res in (item.get("resources") or []):
+        if isinstance(res, dict):
+            res_link = res.get("link", "")
+            if "doi.org" in res_link:
+                doi_url = res_link
+                break
+
     return {
         "title": item.get("title", "Unknown Title"),
         "authors": _parse_authors_serpapi(pub_info),
         "year": _extract_year(summary),
-        "url": item.get("link") or item.get("result_id"),
+        "url": link or doi_url,
         "abstract": item.get("snippet", ""),
         "venue": summary,
         "prisma_stage": "identified",
         "decision": None,
         "reason": None,
         "extracted_data": None,
+        "doi_url": doi_url,
+        "pmc_url": None,
+        "open_access_pdf": None,
+        "arxiv_url": None,
+        "pubmed_url": None,
     }
 
 
 def _source_to_paper(item: dict) -> PaperInfo:
     """Convert PubMed / Semantic Scholar result dict to PaperInfo."""
     return {
-        "title": item.get("title", "Unknown Title"),
-        "authors": item.get("authors", []),
-        "year": item.get("year"),
-        "url": item.get("url"),
-        "abstract": item.get("abstract", ""),
-        "venue": item.get("venue", ""),
-        "prisma_stage": "identified",
-        "decision": None,
-        "reason": None,
-        "extracted_data": None,
+        "title":            item.get("title", "Unknown Title"),
+        "authors":          item.get("authors", []),
+        "year":             item.get("year"),
+        "url":              item.get("url"),
+        "abstract":         item.get("abstract", ""),
+        "venue":            item.get("venue", ""),
+        "prisma_stage":     "identified",
+        "decision":         None,
+        "reason":           None,
+        "extracted_data":   None,
+        # Full-text access URLs — passed through to Eligibility Agent
+        "pmc_url":          item.get("pmc_url"),
+        "doi_url":          item.get("doi_url"),
+        "open_access_pdf":  item.get("open_access_pdf"),
+        "arxiv_url":        item.get("arxiv_url"),
+        "pubmed_url":       item.get("pubmed_url"),
     }
 
 
@@ -123,7 +150,7 @@ def _source_to_paper(item: dict) -> PaperInfo:
 
 async def generate_search_terms(research_question: str, keywords: list[str] | None = None) -> GeneratedSearchTerms:
     """LLM이 Research Question + Keywords를 PICO + MeSH + Boolean query로 변환."""
-    llm = ChatGoogleGenerativeAI(model=SEARCH_MODEL, temperature=0)
+    llm = get_llm(SEARCH_MODEL)
     keywords_str = ", ".join(keywords) if keywords else "없음"
     prompt = SEARCH_TERMS_PROMPT.format(research_question=research_question, keywords=keywords_str)
 

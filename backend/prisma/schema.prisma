@@ -13,6 +13,8 @@ model ResearchSession {
   query             String
   keywords          String[]
   booleanQuery      String   @default("")
+  generatedTerms    Json?
+  researchSummary   String   @default("")
   searchTerms       String[]
   inclusionCriteria String[]
   exclusionCriteria String[]
@@ -33,6 +35,11 @@ model Paper {
   url           String?
   abstract      String?
   venue         String?
+  pmcUrl        String?
+  doiUrl        String?
+  openAccessPdf String?
+  arxivUrl      String?
+  pubmedUrl     String?
   prismaStage   String          // identified | screened | eligible | included
   decision      String?         // INCLUDE | EXCLUDE
   reason        String?

@@ -23,4 +23,11 @@ export class CreateResearchDto {
   @IsArray()
   @IsOptional()
   exclusionCriteria: string[] = [];
+
+  @IsString()
+  @IsOptional()
+  researchSummary?: string;
+
+  @IsOptional()
+  generatedTerms?: Record<string, unknown>;
 }

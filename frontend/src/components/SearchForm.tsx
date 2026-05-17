@@ -2,19 +2,14 @@
 
 import { useState, FormEvent, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { createResearch, generateTerms, previewSearch, SearchTerms } from '@/lib/api';
+import { createResearch, generateTerms, SearchTerms } from '@/lib/api';
 
 const QUOTES = [
   '무한대를 품은 가슴만이 위대하다',
   '멍든 사과에도 햇살은 스며들듯, 너의 도전에도 빛은 머문다.',
 ];
 
-type Phase = 'input' | 'generating' | 'review' | 'previewing' | 'preview' | 'searching';
-
-interface PreviewCounts {
-  pubmed: number | null;
-  semantic_scholar: number | null;
-}
+type Phase = 'input' | 'generating' | 'review' | 'searching';
 
 export default function SearchForm() {
   const router = useRouter();
@@ -25,10 +20,10 @@ export default function SearchForm() {
   const [error, setError]                       = useState('');
   const [terms, setTerms]                       = useState<SearchTerms | null>(null);
   const [editedQuery, setEditedQuery]           = useState('');
+  const [editedReasoning, setEditedReasoning]   = useState('');
   const [isStarting, setIsStarting]             = useState(false);
   const [quoteIndex, setQuoteIndex]             = useState(0);
   const [visible, setVisible]                   = useState(true);
-  const [preview, setPreview]                   = useState<PreviewCounts | null>(null);
   const keywordsRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -55,6 +50,7 @@ export default function SearchForm() {
       if (res.status === 'ok' && res.terms) {
         setTerms(res.terms);
         setEditedQuery(res.terms.boolean_query || question);
+        setEditedReasoning(res.terms.reasoning || '');
       } else {
         setEditedQuery(question);
         setTerms(null);
@@ -64,17 +60,6 @@ export default function SearchForm() {
       setTerms(null);
     }
     setPhase('review');
-  };
-
-  const handlePreview = async () => {
-    setPhase('previewing');
-    try {
-      const res = await previewSearch(editedQuery.trim(), researchQuestion.trim());
-      setPreview(res.counts);
-    } catch {
-      setPreview({ pubmed: null, semantic_scholar: null });
-    }
-    setPhase('preview');
   };
 
   const handleStartSearch = async () => {
@@ -88,25 +73,22 @@ export default function SearchForm() {
         searchTerms: [],
         inclusionCriteria: [],
         exclusionCriteria: [],
+        researchSummary: editedReasoning.trim() || undefined,
+        generatedTerms: terms
+          ? { ...terms, boolean_query: editedQuery.trim(), reasoning: editedReasoning.trim() }
+          : undefined,
       });
       router.push(`/results/${sessionId}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '요청 실패. 백엔드 연결을 확인하세요.');
       setIsStarting(false);
-      setPhase('preview');
+      setPhase('review');
     }
   };
 
   const handleReset = () => {
     setPhase('input');
     setTerms(null);
-    setPreview(null);
-    setError('');
-  };
-
-  const handleBackToReview = () => {
-    setPhase('review');
-    setPreview(null);
     setError('');
   };
 
@@ -233,7 +215,17 @@ export default function SearchForm() {
                 <span className="text-[10px] text-blue-400 ml-auto">Identification Agent</span>
               </div>
               {terms.reasoning && (
-                <p className="text-sm text-blue-700 leading-relaxed">{terms.reasoning}</p>
+                <textarea
+                  value={editedReasoning}
+                  onChange={e => {
+                    setEditedReasoning(e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = e.target.scrollHeight + 'px';
+                  }}
+                  ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
+                  rows={1}
+                  className="w-full text-sm text-blue-700 leading-relaxed bg-transparent border border-blue-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-blue-300 focus:bg-blue-100/30 overflow-hidden"
+                />
               )}
             </div>
 
@@ -303,93 +295,6 @@ export default function SearchForm() {
             className="flex-1 py-2.5 rounded-full border border-gray-200 text-sm text-gray-500 hover:bg-gray-50 transition-colors"
           >
             다시 입력
-          </button>
-          <button
-            onClick={handlePreview}
-            className="flex-[2] py-2.5 rounded-full bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
-          >
-            검색 범위 미리보기 →
-          </button>
-        </div>
-
-        {error && <p className="text-xs text-red-500">{error}</p>}
-      </div>
-    );
-  }
-
-  // ── previewing ──────────────────────────────────────────────────────────────
-  if (phase === 'previewing') {
-    return (
-      <div className="w-full max-w-xl border border-gray-200 rounded-2xl p-5 bg-white shadow-sm">
-        <div className="flex items-center gap-3 mb-4">
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-ping inline-block flex-shrink-0" />
-          <p className="text-sm font-semibold text-gray-700">검색 범위 확인 중...</p>
-        </div>
-        <div className="space-y-2">
-          {['PubMed', 'Semantic Scholar'].map((db, i) => (
-            <div key={i} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-xl">
-              <span className="text-xs text-gray-600">{db}</span>
-              <span className="w-16 h-3 bg-gray-200 rounded animate-pulse" />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // ── preview result ──────────────────────────────────────────────────────────
-  if (phase === 'preview') {
-    const counts = preview ?? { pubmed: null, semantic_scholar: null };
-    const total  = (counts.pubmed ?? 0) + (counts.semantic_scholar ?? 0);
-    const isNarrow = total > 0 && total < 100;
-    const isBroad  = total > 50000;
-
-    return (
-      <div className="flex flex-col items-center w-full max-w-xl gap-3">
-        <div className="w-full border border-gray-200 rounded-2xl p-5 bg-white shadow-sm">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">DB 검색 미리보기</p>
-
-          <div className="space-y-2 mb-4">
-            {[
-              { label: 'PubMed',           count: counts.pubmed,           color: 'bg-blue-400' },
-              { label: 'Semantic Scholar', count: counts.semantic_scholar, color: 'bg-indigo-400' },
-            ].map(({ label, count, color }) => {
-              const pct = total > 0 && count !== null ? Math.round((count / total) * 100) : 0;
-              return (
-                <div key={label} className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-600">{label}</span>
-                    <span className="text-xs font-semibold text-gray-700">
-                      {count !== null ? count.toLocaleString() + '건' : '조회 실패'}
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className={`rounded-xl px-3 py-2 text-xs ${
-            isBroad  ? 'bg-amber-50 text-amber-700' :
-            isNarrow ? 'bg-red-50 text-red-600' :
-                       'bg-green-50 text-green-700'
-          }`}>
-            {isBroad
-              ? `총 ${total.toLocaleString()}건 — 검색 범위가 넓습니다. Search Terms를 좁히는 것을 권장합니다.`
-              : isNarrow
-              ? `총 ${total.toLocaleString()}건 — 검색 결과가 적습니다. Search Terms를 넓히는 것을 권장합니다.`
-              : `총 ${total.toLocaleString()}건 — 적절한 검색 범위입니다.`}
-          </div>
-        </div>
-
-        <div className="w-full flex gap-3">
-          <button
-            onClick={handleBackToReview}
-            className="flex-1 py-2.5 rounded-full border border-gray-200 text-sm text-gray-500 hover:bg-gray-50 transition-colors"
-          >
-            ← 검색어 수정
           </button>
           <button
             onClick={handleStartSearch}

@@ -4,12 +4,12 @@ import json
 import asyncio
 from pathlib import Path
 from typing import Any, Callable, Coroutine
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
 
 from state import ReviewState, PaperInfo
-from config import ANTHROPIC_API_KEY, REVIEW_MODEL, PAPERS_DIR
+from config import EXTRACTION_MODEL, PAPERS_DIR
 from prompts import EXTRACTION_PROMPT
+from utils.llm_factory import get_llm
 
 
 async def extraction_agent(
@@ -29,12 +29,7 @@ async def extraction_agent(
         await emit({"type": "agent_complete", "agent": "ExtractionAgent", "message": "추출할 논문 없음"})
         return {"included_papers": [], "logs": ["[ExtractionAgent] 추출할 논문 없음"]}
 
-    llm = ChatAnthropic(
-        model=REVIEW_MODEL,
-        anthropic_api_key=ANTHROPIC_API_KEY,
-        temperature=0,
-        max_tokens=4096,
-    )
+    llm = get_llm(EXTRACTION_MODEL, max_tokens=4096)
 
     BATCH = 10
     extracted_map: dict[str, dict] = {}
@@ -47,7 +42,7 @@ async def extraction_agent(
             indent=2,
         )
         prompt = EXTRACTION_PROMPT.format(
-            query=state["query"],
+            query=state.get("research_question") or state.get("query", ""),
             papers=papers_json,
         )
 

@@ -18,6 +18,7 @@ from agents.search_agent import generate_search_terms
 from sources.pubmed import search_pubmed
 from sources.semantic_scholar import search_semantic_scholar
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("main")
 
 # ── SSE event queues (session_id → asyncio.Queue) ────────────────────────────
@@ -88,7 +89,7 @@ async def _notify_nestjs(session_id: str, final_state: ReviewState):
 
 
 async def _save_stage_to_db(session_id: str, stage: str, papers: list, prisma_stats: dict):
-    """Save intermediate stage results to NestJS DB."""
+    """Save intermediate stage results to NestJS DB (including full-text URL fields)."""
     logger.info(f"[{session_id}] Saving stage '{stage}': {len(papers)} papers")
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -98,14 +99,20 @@ async def _save_stage_to_db(session_id: str, stage: str, papers: list, prisma_st
                     "stage": stage,
                     "papers": [
                         {
-                            "title":    p.get("title", ""),
-                            "authors":  p.get("authors", []),
-                            "year":     p.get("year"),
-                            "url":      p.get("url"),
-                            "abstract": p.get("abstract", ""),
-                            "venue":    p.get("venue", ""),
-                            "decision": p.get("decision"),
-                            "reason":   p.get("reason"),
+                            "title":           p.get("title", ""),
+                            "authors":         p.get("authors", []),
+                            "year":            p.get("year"),
+                            "url":             p.get("url"),
+                            "abstract":        p.get("abstract", ""),
+                            "venue":           p.get("venue", ""),
+                            "pmc_url":         p.get("pmc_url"),
+                            "doi_url":         p.get("doi_url"),
+                            "open_access_pdf": p.get("open_access_pdf"),
+                            "arxiv_url":       p.get("arxiv_url"),
+                            "pubmed_url":      p.get("pubmed_url"),
+                            "decision":        p.get("decision"),
+                            "reason":          p.get("reason"),
+                            "extracted_data":  p.get("extracted_data"),
                         }
                         for p in papers
                     ],
@@ -115,6 +122,41 @@ async def _save_stage_to_db(session_id: str, stage: str, papers: list, prisma_st
             logger.info(f"[{session_id}] Stage '{stage}' save response: {resp.status_code}")
     except Exception as e:
         logger.error(f"[{session_id}] Failed to save stage '{stage}': {e}")
+
+
+async def _load_papers_from_db(session_id: str, prisma_stage: str) -> list[dict]:
+    """Load papers of a given PRISMA stage from NestJS DB (fallback for lost MemorySaver state)."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{NESTJS_CALLBACK_URL}/api/sessions/{session_id}")
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            papers = data.get("papers", [])
+            return [
+                {
+                    "title":           p.get("title", ""),
+                    "authors":         p.get("authors", []),
+                    "year":            p.get("year"),
+                    "url":             p.get("url"),
+                    "abstract":        p.get("abstract", ""),
+                    "venue":           p.get("venue", ""),
+                    "pmc_url":         p.get("pmcUrl"),
+                    "doi_url":         p.get("doiUrl"),
+                    "open_access_pdf": p.get("openAccessPdf"),
+                    "arxiv_url":       p.get("arxivUrl"),
+                    "pubmed_url":      p.get("pubmedUrl"),
+                    "decision":        p.get("decision"),
+                    "reason":          p.get("reason"),
+                    "prisma_stage":    p.get("prismaStage", prisma_stage),
+                    "extracted_data":  p.get("extractedData"),
+                }
+                for p in papers
+                if p.get("prismaStage") == prisma_stage
+            ]
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to load {prisma_stage} papers from DB: {e}")
+        return []
 
 
 # ── Pipeline runner ────────────────────────────────────────────────────────────
@@ -137,6 +179,42 @@ async def _run_graph(session_id: str, initial_state: ReviewState | None = None, 
         if updated_fields:
             # Inject user-supplied criteria before resuming
             prisma_graph.update_state(config, updated_fields)
+
+        # --- DB fallback: if MemorySaver lost state (container restart), rebuild from DB ---
+        if initial_state is None:
+            snapshot = prisma_graph.get_state(config)
+            snap_vals = snapshot.values if snapshot else {}
+            next_nodes_now = list(snapshot.next) if snapshot else []
+
+            # Determine which stage we're trying to resume based on what's in the state
+            needs_screening  = (not snap_vals.get("identified_papers") and not snap_vals.get("screened_papers"))
+            needs_eligibility = (not snap_vals.get("screened_papers") and snap_vals.get("identified_papers") is not None)
+
+            if not snap_vals or (not snap_vals.get("identified_papers") and not snap_vals.get("screened_papers")):
+                # No state at all — try to load from DB
+                identified_from_db = await _load_papers_from_db(session_id, "identified")
+                screened_from_db   = await _load_papers_from_db(session_id, "screened")
+                if screened_from_db:
+                    logger.info(f"[{session_id}] Restoring state from DB: {len(screened_from_db)} screened papers")
+                    prisma_graph.update_state(config, {
+                        "session_id": session_id,
+                        "identified_papers": identified_from_db,
+                        "screened_papers": screened_from_db,
+                        "research_question": "",
+                    }, as_node="eligibility")
+                elif identified_from_db:
+                    logger.info(f"[{session_id}] Restoring state from DB: {len(identified_from_db)} identified papers")
+                    prisma_graph.update_state(config, {
+                        "session_id": session_id,
+                        "identified_papers": identified_from_db,
+                        "research_question": "",
+                    }, as_node="screening")
+            elif snap_vals.get("identified_papers") and not snap_vals.get("screened_papers"):
+                # Screening was done but screened_papers missing — reload
+                screened_from_db = await _load_papers_from_db(session_id, "screened")
+                if screened_from_db:
+                    logger.info(f"[{session_id}] Restoring screened_papers from DB: {len(screened_from_db)}")
+                    prisma_graph.update_state(config, {"screened_papers": screened_from_db})
 
         # ainvoke with None resumes from the last interrupt point
         input_state = initial_state if initial_state is not None else None
@@ -161,27 +239,44 @@ async def _run_graph(session_id: str, initial_state: ReviewState | None = None, 
 
             if completed_stage == "identification":
                 identified = current_values.get("identified_papers", [])
+                generated  = current_values.get("generated_search_terms") or {}
                 try:
                     async with httpx.AsyncClient(timeout=30.0) as client:
+                        # Save identified papers
                         await client.post(
                             f"{NESTJS_CALLBACK_URL}/api/sessions/{session_id}/identified",
                             json={
                                 "papers": [
                                     {
-                                        "title":    p.get("title", ""),
-                                        "authors":  p.get("authors", []),
-                                        "year":     p.get("year"),
-                                        "url":      p.get("url"),
-                                        "abstract": p.get("abstract", ""),
-                                        "venue":    p.get("venue", ""),
+                                        "title":           p.get("title", ""),
+                                        "authors":         p.get("authors", []),
+                                        "year":            p.get("year"),
+                                        "url":             p.get("url"),
+                                        "abstract":        p.get("abstract", ""),
+                                        "venue":           p.get("venue", ""),
+                                        "pmc_url":         p.get("pmc_url"),
+                                        "doi_url":         p.get("doi_url"),
+                                        "open_access_pdf": p.get("open_access_pdf"),
+                                        "arxiv_url":       p.get("arxiv_url"),
+                                        "pubmed_url":      p.get("pubmed_url"),
                                     }
                                     for p in identified
                                 ],
                                 "prisma_stats": current_values.get("prisma_stats", {}),
                             },
                         )
+                        # Save generated terms only if LLM actually generated them (not preset)
+                        # Preset case: SearchForm already saved full generatedTerms at session creation
+                        if generated and generated.get("reasoning"):
+                            await client.post(
+                                f"{NESTJS_CALLBACK_URL}/api/sessions/{session_id}/generated-terms",
+                                json={
+                                    "generatedTerms": generated,
+                                    "researchSummary": generated.get("reasoning", ""),
+                                },
+                            )
                 except Exception as e:
-                    logger.error(f"[{session_id}] Failed to save identified papers: {e}")
+                    logger.error(f"[{session_id}] Failed to save identification results: {e}")
 
                 # Also emit identified_papers SSE for live display
                 await _emit_to(session_id, {
@@ -384,21 +479,29 @@ async def stream_events(session_id: str):
             # Replay screened paper decisions
             for p in vals.get("screened_papers", []):
                 replay_events.append({
-                    "type": "paper_decision",
+                    "type":     "paper_decision",
                     "title":    p.get("title", ""),
                     "decision": p.get("decision", ""),
                     "reason":   p.get("reason", ""),
                     "stage":    "screening",
+                    "url":      p.get("url"),
                 })
 
             # Replay eligible paper decisions
             for p in vals.get("eligible_papers", []):
+                ed = p.get("extracted_data") or {}
                 replay_events.append({
-                    "type": "paper_decision",
-                    "title":    p.get("title", ""),
-                    "decision": p.get("decision", ""),
-                    "reason":   p.get("reason", ""),
-                    "stage":    "eligibility",
+                    "type":                "paper_decision",
+                    "title":               p.get("title", ""),
+                    "decision":            p.get("decision", ""),
+                    "reason":              p.get("reason", ""),
+                    "stage":               "eligibility",
+                    "url":                 p.get("url"),
+                    "study_design":        ed.get("study_design"),
+                    "confidence":          ed.get("confidence"),
+                    "full_text_available": ed.get("full_text_available"),
+                    "full_text_source":    ed.get("full_text_source"),
+                    "full_text_snippet":   ed.get("full_text_snippet"),
                 })
 
             if vals.get("prisma_stats"):

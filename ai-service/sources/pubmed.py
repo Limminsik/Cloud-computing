@@ -116,18 +116,21 @@ def search_pubmed(query: str, max_results: int = 200) -> tuple[list[dict], int]:
         pmid = pmid_el.text if pmid_el is not None else ""
         url = _pubmed_url(pmid) if pmid else None
 
-        # PMC ID (free full text via PubMed Central)
+        # PMC ID / DOI — only from PubmedData > ArticleIdList (not from reference lists)
         pmc_url = None
         doi_url = None
-        for art_id in article.findall(".//ArticleId"):
-            id_type = art_id.get("IdType", "")
-            if id_type == "pmc" and art_id.text:
-                pmc_id = art_id.text.strip()
-                if not pmc_id.startswith("PMC"):
-                    pmc_id = f"PMC{pmc_id}"
-                pmc_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmc_id}/"
-            elif id_type == "doi" and art_id.text:
-                doi_url = f"https://doi.org/{art_id.text.strip()}"
+        pubmed_data = article.find("PubmedData")
+        id_list = pubmed_data.find("ArticleIdList") if pubmed_data is not None else None
+        if id_list is not None:
+            for art_id in id_list.findall("ArticleId"):
+                id_type = art_id.get("IdType", "")
+                if id_type == "pmc" and art_id.text:
+                    pmc_id = art_id.text.strip()
+                    if not pmc_id.startswith("PMC"):
+                        pmc_id = f"PMC{pmc_id}"
+                    pmc_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmc_id}/"
+                elif id_type == "doi" and art_id.text:
+                    doi_url = f"https://doi.org/{art_id.text.strip()}"
 
         if title:
             papers.append({

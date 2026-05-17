@@ -8,6 +8,8 @@ export interface CreateResearchPayload {
   searchTerms: string[];
   inclusionCriteria: string[];
   exclusionCriteria: string[];
+  researchSummary?: string;
+  generatedTerms?: Record<string, unknown>;
 }
 
 export interface Paper {
@@ -94,6 +96,15 @@ export async function listSessions(): Promise<ResearchSession[]> {
   const res = await fetch(`${NESTJS_URL}/api/sessions`);
   if (!res.ok) throw new Error('Failed to list sessions');
   return res.json();
+}
+
+export async function updateResearchSummary(sessionId: string, researchSummary: string): Promise<void> {
+  const res = await fetch(`${NESTJS_URL}/api/sessions/${sessionId}/research-summary`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ researchSummary }),
+  });
+  if (!res.ok) throw new Error('Failed to update research summary');
 }
 
 /** Returns the SSE URL for direct browser connection to the AI service. */

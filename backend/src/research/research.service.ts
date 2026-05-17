@@ -27,6 +27,8 @@ export class ResearchService {
         inclusionCriteria: dto.inclusionCriteria,
         exclusionCriteria: dto.exclusionCriteria,
         status: 'running',
+        ...(dto.researchSummary ? { researchSummary: dto.researchSummary } : {}),
+        ...(dto.generatedTerms  ? { generatedTerms:  dto.generatedTerms as any } : {}),
       },
     });
 
@@ -83,7 +85,27 @@ export class ResearchService {
     });
   }
 
-  async saveIdentifiedPapers(id: string, papers: { title: string; authors?: string[]; year?: number; url?: string; abstract?: string; venue?: string }[], prismaStats?: any) {
+  async saveGeneratedTerms(id: string, generatedTerms: any, researchSummary?: string) {
+    const session = await this.prisma.researchSession.findUnique({ where: { id } });
+    if (!session) throw new NotFoundException(`Session ${id} not found`);
+    await this.prisma.researchSession.update({
+      where: { id },
+      data: {
+        generatedTerms,
+        ...(researchSummary !== undefined ? { researchSummary } : {}),
+      },
+    });
+    return { saved: true };
+  }
+
+  async updateResearchSummary(id: string, researchSummary: string) {
+    const session = await this.prisma.researchSession.findUnique({ where: { id } });
+    if (!session) throw new NotFoundException(`Session ${id} not found`);
+    await this.prisma.researchSession.update({ where: { id }, data: { researchSummary } });
+    return { saved: true };
+  }
+
+  async saveIdentifiedPapers(id: string, papers: any[], prismaStats?: any) {
     const session = await this.prisma.researchSession.findUnique({ where: { id } });
     if (!session) throw new NotFoundException(`Session ${id} not found`);
 
@@ -99,6 +121,11 @@ export class ResearchService {
           url: p.url ?? null,
           abstract: p.abstract ?? null,
           venue: p.venue ?? null,
+          pmcUrl: p.pmc_url ?? null,
+          doiUrl: p.doi_url ?? null,
+          openAccessPdf: p.open_access_pdf ?? null,
+          arxivUrl: p.arxiv_url ?? null,
+          pubmedUrl: p.pubmed_url ?? null,
           prismaStage: 'identified',
           decision: null,
           reason: null,
@@ -132,6 +159,11 @@ export class ResearchService {
           url: p.url ?? null,
           abstract: p.abstract ?? null,
           venue: p.venue ?? null,
+          pmcUrl: p.pmc_url ?? null,
+          doiUrl: p.doi_url ?? null,
+          openAccessPdf: p.open_access_pdf ?? null,
+          arxivUrl: p.arxiv_url ?? null,
+          pubmedUrl: p.pubmed_url ?? null,
           prismaStage: stage,
           decision: p.decision ?? null,
           reason: p.reason ?? null,

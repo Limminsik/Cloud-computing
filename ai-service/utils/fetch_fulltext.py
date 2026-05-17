@@ -11,11 +11,14 @@ Strategy order:
 6. pubmed_url       → PubMed abstract page (fallback)
 """
 
+import logging
 import re
 import httpx
 from io import BytesIO
 
 from config import CONTACT_EMAIL
+
+logger = logging.getLogger("fetch_fulltext")
 
 try:
     from pypdf import PdfReader
@@ -189,69 +192,72 @@ def _fetch_unpaywall(doi_url: str) -> str | None:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def fetch_fulltext(url_or_paper: str | dict | None) -> str | None:
-    """
-    Fetch full text from a paper URL or paper dict.
-    - Pass a URL string for legacy single-URL mode.
-    - Pass the full paper dict to use all available URL fields.
-    Returns extracted text (up to MAX_CHARS) or None if unavailable.
-    """
+def fetch_fulltext_with_source(url_or_paper: str | dict | None) -> tuple[str | None, str | None]:
+    """Same as fetch_fulltext but also returns the source label that succeeded."""
     if url_or_paper is None:
-        return None
+        return None, None
 
-    # Normalise to paper dict
     if isinstance(url_or_paper, str):
         paper: dict = {"url": url_or_paper}
     else:
         paper = url_or_paper
 
-    # Build ordered list of (label, fetch_fn) to try
     attempts: list[tuple[str, object]] = []
 
-    # 1. Open access PDF (Semantic Scholar)
     oa_pdf = paper.get("open_access_pdf")
     if oa_pdf:
-        attempts.append(("oa_pdf_pdf", lambda u=oa_pdf: _fetch_pdf(u)))
-        attempts.append(("oa_pdf_html", lambda u=oa_pdf: _fetch_html(u)))
+        attempts.append(("OA PDF", lambda u=oa_pdf: _fetch_pdf(u)))
+        attempts.append(("OA PDF (HTML)", lambda u=oa_pdf: _fetch_html(u)))
 
-    # 2. arXiv
     arxiv_url = paper.get("arxiv_url") or paper.get("url", "")
     arxiv_id = _extract_arxiv_id(arxiv_url or "")
     if not arxiv_id and paper.get("url"):
         arxiv_id = _extract_arxiv_id(paper["url"])
     if arxiv_id:
-        attempts.append(("arxiv", lambda aid=arxiv_id: _fetch_arxiv(aid)))
+        attempts.append(("arXiv", lambda aid=arxiv_id: _fetch_arxiv(aid)))
 
-    # 3. PMC (PubMed Central — free full text)
     pmc_url = paper.get("pmc_url")
     if pmc_url:
-        attempts.append(("pmc", lambda u=pmc_url: _fetch_pmc(u)))
+        attempts.append(("PubMed Central", lambda u=pmc_url: _fetch_pmc(u)))
 
-    # 4. Unpaywall via DOI
     doi_url = paper.get("doi_url")
     if doi_url:
-        attempts.append(("unpaywall", lambda u=doi_url: _fetch_unpaywall(u)))
+        attempts.append(("Unpaywall", lambda u=doi_url: _fetch_unpaywall(u)))
 
-    # 5. Primary URL — try as PDF then HTML
     primary_url = paper.get("url")
     if primary_url:
         if primary_url.lower().endswith(".pdf") or "/pdf/" in primary_url.lower():
-            attempts.append(("primary_pdf", lambda u=primary_url: _fetch_pdf(u)))
+            attempts.append(("직접 PDF", lambda u=primary_url: _fetch_pdf(u)))
         else:
-            attempts.append(("primary_html", lambda u=primary_url: _fetch_html(u)))
-            attempts.append(("primary_pdf_fallback", lambda u=primary_url: _fetch_pdf(u)))
+            attempts.append(("직접 링크", lambda u=primary_url: _fetch_html(u)))
+            attempts.append(("직접 링크 (PDF)", lambda u=primary_url: _fetch_pdf(u)))
 
-    # 6. PubMed abstract page (last resort — usually abstract only)
     pubmed_url = paper.get("pubmed_url")
     if pubmed_url and pubmed_url != primary_url:
-        attempts.append(("pubmed_abstract", lambda u=pubmed_url: _fetch_html(u, selectors=["#abstract", ".abstract-content"])))
+        attempts.append(("PubMed 초록", lambda u=pubmed_url: _fetch_html(u, selectors=["#abstract", ".abstract-content"])))
 
-    for _label, fn in attempts:
+    title_hint = (paper.get("title") or "")[:60]
+    if not attempts:
+        logger.info(f"[fetch_fulltext] No URL fields available — '{title_hint}'")
+        return None, None
+
+    for label, fn in attempts:
         try:
             result = fn()
             if result and len(result.strip()) > 150:
-                return result
-        except Exception:
+                logger.info(f"[fetch_fulltext] ✓ {label} — '{title_hint}' ({len(result)} chars)")
+                return result, label
+            else:
+                logger.debug(f"[fetch_fulltext] ✗ {label} — '{title_hint}'")
+        except Exception as e:
+            logger.debug(f"[fetch_fulltext] ✗ {label} error — '{title_hint}': {e}")
             continue
 
-    return None
+    logger.info(f"[fetch_fulltext] All strategies failed — '{title_hint}'")
+    return None, None
+
+
+def fetch_fulltext(url_or_paper: str | dict | None) -> str | None:
+    """Convenience wrapper — returns text only (source label discarded)."""
+    text, _ = fetch_fulltext_with_source(url_or_paper)
+    return text

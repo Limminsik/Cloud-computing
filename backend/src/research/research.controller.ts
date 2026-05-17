@@ -46,6 +46,26 @@ export class ResearchController {
     return this.researchService.saveStageResults(id, body.stage, body.papers, body.prisma_stats);
   }
 
+  /** Save Identification Agent's generated terms + auto summary */
+  @Post('sessions/:id/generated-terms')
+  @HttpCode(HttpStatus.OK)
+  async saveGeneratedTerms(
+    @Param('id') id: string,
+    @Body() body: { generatedTerms: any; researchSummary?: string },
+  ) {
+    return this.researchService.saveGeneratedTerms(id, body.generatedTerms, body.researchSummary);
+  }
+
+  /** Update user-edited research summary */
+  @Post('sessions/:id/research-summary')
+  @HttpCode(HttpStatus.OK)
+  async updateResearchSummary(
+    @Param('id') id: string,
+    @Body() body: { researchSummary: string },
+  ) {
+    return this.researchService.updateResearchSummary(id, body.researchSummary);
+  }
+
   /** Delete a session */
   @Delete('sessions/:id')
   @HttpCode(HttpStatus.NO_CONTENT)

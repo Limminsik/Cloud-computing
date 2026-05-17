@@ -3,7 +3,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install
+RUN npm install && npm install sharp
 
 COPY . .
 
@@ -22,7 +22,8 @@ WORKDIR /app
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public 2>/dev/null || true
+RUN mkdir -p ./public
+COPY --from=builder /app/public ./public
 
 EXPOSE 3000
 

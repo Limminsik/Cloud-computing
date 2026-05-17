@@ -7,6 +7,7 @@ import { AgentState, AgentStatus } from '@/components/AgentPipeline';
 import HeaderSearchBar from '@/components/HeaderSearchBar';
 import LiveLog, { LogEntry } from '@/components/LiveLog';
 import PaperList, { PaperDecision } from '@/components/PaperList';
+import EligibilityPaperList from '@/components/EligibilityPaperList';
 import IdentifiedPaperList, { IdentifiedPaper } from '@/components/IdentifiedPaperList';
 import ReviewReport from '@/components/ReviewReport';
 import Prisma2020Diagram, { PrismaStage } from '@/components/Prisma2020Diagram';
@@ -60,12 +61,6 @@ const DONE_AGENTS_BY_STATUS: Record<string, string[]> = {
 
 const INITIAL_STATS = { identified: 0, fetched: 0, duplicates: 0, screened: 0, eligible: 0, included: 0 };
 
-interface SearchTermsInfo {
-  pico?: { population?: string; intervention?: string; comparison?: string; outcome?: string };
-  mesh_terms?: string[];
-  keywords?: string[];
-  boolean_query?: string;
-}
 
 let logIdCounter = 0;
 function makeLog(event: Record<string, unknown>): LogEntry {
@@ -92,11 +87,12 @@ export default function ResultsPage() {
   const [query, setQuery]             = useState('');
   const [keywords, setKeywords]       = useState<string[]>([]);
   const [booleanQuery, setBooleanQuery] = useState('');
-  const [activeTab, setActiveTab]     = useState<'identified' | 'papers' | 'report'>('identified');
+  const [activeTab, setActiveTab]     = useState<'identified' | 'papers' | 'eligibility' | 'report'>('identified');
   const [identifiedPapers, setIdentifiedPapers] = useState<IdentifiedPaper[]>([]);
   const [completedStages, setCompletedStages]   = useState<Set<PrismaStage>>(new Set());
   const [activeStage, setActiveStage]           = useState<PrismaStage | null>(null);
-  const [searchTerms, setSearchTerms]           = useState<SearchTermsInfo | null>(null);
+  const [generatedTerms, setGeneratedTerms]     = useState<any | null>(null);
+  const [researchSummary, setResearchSummary]   = useState('');
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -117,6 +113,8 @@ export default function ResultsPage() {
         if (data.keywords?.length) setKeywords(data.keywords);
         if (data.booleanQuery) setBooleanQuery(data.booleanQuery);
         if (data.prismaStats) setStats(data.prismaStats);
+        if (data.generatedTerms) setGeneratedTerms(data.generatedTerms);
+        if (data.researchSummary) setResearchSummary(data.researchSummary);
 
         const allPapers: any[] = data.papers || [];
 
@@ -132,19 +130,35 @@ export default function ResultsPage() {
           setActiveTab('identified');
         }
 
-        // 중간 단계 논문 복원
+        // 중간 단계 논문 복원 (screening / eligible / included)
         const decidedPapers = allPapers.filter((p: any) => p.prismaStage !== 'identified');
         if (decidedPapers.length > 0) {
           setPapers(decidedPapers.map((p: any) => ({
-            title: p.title, decision: p.decision || 'EXCLUDE',
-            reason: p.reason || '', stage: p.prismaStage || 'screened',
+            title:               p.title,
+            decision:            p.decision || 'EXCLUDE',
+            reason:              p.reason   || '',
+            stage:               (p.prismaStage === 'eligible' || p.prismaStage === 'included')
+                               ? 'eligibility' : 'screening',
+            url:                 p.url      ?? null,
+            study_design:        (p.extractedData as any)?.study_design        ?? null,
+            confidence:          (p.extractedData as any)?.confidence          ?? null,
+            full_text_available: (p.extractedData as any)?.full_text_available ?? null,
+            full_text_source:    (p.extractedData as any)?.full_text_source    ?? null,
+            full_text_snippet:   (p.extractedData as any)?.full_text_snippet   ?? null,
           })));
+
           const dbStages = new Set<PrismaStage>(['identification']);
-          if (allPapers.some((p: any) => p.prismaStage === 'screened'))  dbStages.add('screening');
-          if (allPapers.some((p: any) => p.prismaStage === 'eligible'))  dbStages.add('eligibility');
-          if (allPapers.some((p: any) => p.prismaStage === 'included'))  dbStages.add('inclusion');
+          const hasScreened  = allPapers.some((p: any) => p.prismaStage === 'screened');
+          const hasEligible  = allPapers.some((p: any) => p.prismaStage === 'eligible');
+          const hasIncluded  = allPapers.some((p: any) => p.prismaStage === 'included');
+          if (hasScreened)  dbStages.add('screening');
+          if (hasEligible)  dbStages.add('eligibility');
+          if (hasIncluded)  dbStages.add('inclusion');
           setCompletedStages(prev => new Set([...prev, ...dbStages]));
-          setActiveTab('papers');
+
+          // 가장 진행된 탭으로 이동
+          if (hasEligible || hasIncluded) setActiveTab('eligibility');
+          else if (hasScreened)           setActiveTab('papers');
         }
 
         // 에이전트 상태 복원
@@ -189,13 +203,18 @@ export default function ResultsPage() {
 
       // Identification Agent가 생성한 Search Terms
       if (type === 'search_terms_generated') {
-        setSearchTerms({
-          pico:         event.pico as SearchTermsInfo['pico'],
-          mesh_terms:   event.mesh_terms as string[],
-          keywords:     event.keywords as string[],
-          boolean_query: event.boolean_query as string,
-        });
+        const gt = {
+          domain:        event.domain,
+          reasoning:     event.reasoning,
+          pico:          event.pico,
+          mesh_terms:    event.mesh_terms,
+          keywords:      event.keywords,
+          boolean_query: event.boolean_query,
+          concept_groups: event.concept_groups,
+        };
+        setGeneratedTerms(gt);
         if (event.boolean_query) setBooleanQuery(event.boolean_query as string);
+        if (event.reasoning && !researchSummary) setResearchSummary(event.reasoning as string);
       }
 
       if (type === 'identified_papers') {
@@ -203,12 +222,22 @@ export default function ResultsPage() {
         setActiveTab('identified');
       }
 
+      if (type === 'paper_decision' && event.stage === 'eligibility') {
+        setActiveTab('eligibility');
+      }
+
       if (type === 'paper_decision') {
         setPapers(prev => [...prev, {
-          title:    event.title    as string,
-          decision: event.decision as string,
-          reason:   event.reason   as string,
-          stage:    event.stage    as string,
+          title:               event.title               as string,
+          decision:            event.decision            as string,
+          reason:              event.reason              as string,
+          stage:               event.stage               as string,
+          url:                 event.url                 as string | null | undefined,
+          study_design:        event.study_design        as string | null | undefined,
+          confidence:          event.confidence          as string | null | undefined,
+          full_text_available: event.full_text_available as boolean | null | undefined,
+          full_text_source:    event.full_text_source    as string | null | undefined,
+          full_text_snippet:   event.full_text_snippet   as string | null | undefined,
         }]);
         setActiveTab(prev => prev === 'identified' ? 'papers' : prev);
       }
@@ -254,6 +283,7 @@ export default function ResultsPage() {
 
   const handleRunStage = async (stage: PrismaStage, criteria: string[]) => {
     setActiveStage(stage);
+    setActiveTab(stage === 'eligibility' ? 'eligibility' : 'papers');
     try {
       await fetch(`${NESTJS_URL}/api/sessions/${sessionId}/run-stage`, {
         method: 'POST',
@@ -264,7 +294,7 @@ export default function ResultsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
 
       {/* ── 상단 헤더 ── */}
       <div className="bg-white border-b border-gray-200 px-6 py-2.5 flex items-center gap-4 sticky top-0 z-30">
@@ -322,15 +352,23 @@ export default function ResultsPage() {
                 onClick={() => setActiveTab('identified')}
                 className={`px-2.5 py-1 transition-colors ${activeTab === 'identified' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
               >
-                식별 {identifiedPapers.length > 0 && `(${identifiedPapers.length})`}
+                식별 ({identifiedPapers.length})
               </button>
             )}
-            {(papers.length > 0 || completedStages.has('identification')) && (
+            {(papers.filter(p => p.stage === 'screening').length > 0 || completedStages.has('identification')) && (
               <button
                 onClick={() => setActiveTab('papers')}
                 className={`px-2.5 py-1 transition-colors ${activeTab === 'papers' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
               >
-                심사 {papers.length > 0 ? `(${papers.length})` : ''}
+                심사 {papers.filter(p => p.stage === 'screening').length > 0 ? `(${papers.filter(p => p.stage === 'screening').length})` : ''}
+              </button>
+            )}
+            {(papers.some(p => p.stage === 'eligibility') || completedStages.has('screening')) && (
+              <button
+                onClick={() => setActiveTab('eligibility')}
+                className={`px-2.5 py-1 transition-colors ${activeTab === 'eligibility' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                적격성 {papers.filter(p => p.stage === 'eligibility').length > 0 ? `(${papers.filter(p => p.stage === 'eligibility').length})` : ''}
               </button>
             )}
             {report && (
@@ -354,41 +392,44 @@ export default function ResultsPage() {
       <div className="flex flex-1 min-h-0">
 
         {/* ── 좌측: PRISMA 2020 Flow Diagram ── */}
-        <aside className="w-60 flex-shrink-0 bg-white border-r border-gray-100 px-3 py-4 overflow-y-auto">
+        <aside className="w-60 flex-shrink-0 bg-white border-r border-gray-100 px-3 py-4 overflow-y-auto h-full">
           <Prisma2020Diagram
             stats={stats}
             completedStages={completedStages}
             onRunStage={handleRunStage}
             activeStage={activeStage}
+            onSelectStage={(tab) => setActiveTab(tab as any)}
           />
         </aside>
 
         {/* ── 중앙: 콘텐츠 ── */}
         <main className="flex-1 flex flex-col min-w-0">
 
-          {/* 콘텐츠 영역 */}
-          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {/* 고정 헤더 카드 영역 */}
+          <div className="flex-shrink-0 px-6 pt-5 space-y-3">
             {showLog && <div className="card"><LiveLog logs={logs} /></div>}
 
-            {/* Search Terms (Identification 완료 시) */}
-            {searchTerms && activeTab === 'identified' && (
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-semibold text-blue-700">Identification Agent — 생성된 Search Terms</p>
-                {searchTerms.keywords && searchTerms.keywords.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {searchTerms.keywords.map((t, i) => (
-                      <span key={i} className="text-[11px] bg-white border border-blue-200 text-blue-700 rounded-full px-2.5 py-0.5">{t}</span>
-                    ))}
-                  </div>
-                )}
-                {searchTerms.boolean_query && (
-                  <code className="text-xs bg-white border border-blue-100 rounded-lg px-3 py-2 block text-gray-700 break-all font-mono">
-                    {searchTerms.boolean_query}
-                  </code>
-                )}
+            {/* Identification Analysis Card */}
+            {query && (
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-blue-700">
+                    Research Question
+                    <span className="ml-1.5 text-[10px] font-normal text-gray-400">— Identification Agent</span>
+                  </p>
+                  {generatedTerms?.domain && (
+                    <span className="text-[11px] bg-blue-100 text-blue-600 rounded-full px-2.5 py-0.5">{generatedTerms.domain}</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-600 leading-relaxed bg-white border border-blue-100 rounded-lg px-3 py-2">
+                  {researchSummary || query}
+                </p>
               </div>
             )}
+          </div>
 
+          {/* 스크롤 가능한 탭 콘텐츠 — 항상 동일한 높이 유지 */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
             {activeTab === 'identified' && (
               identifiedPapers.length === 0
                 ? <div className="text-center py-20 text-gray-300 text-sm">AI 에이전트가 논문을 탐색하고 있습니다...</div>
@@ -396,10 +437,10 @@ export default function ResultsPage() {
             )}
 
             {activeTab === 'papers' && (
-              papers.length === 0
+              papers.filter(p => p.stage === 'screening').length === 0
                 ? (
                   <div className="text-center py-20 text-gray-300 text-sm space-y-2">
-                    {activeStage
+                    {activeStage === 'screening'
                       ? <>
                           <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping inline-block mb-3" />
                           <p className="text-blue-400">AI가 논문을 심사하고 있습니다...</p>
@@ -409,7 +450,14 @@ export default function ResultsPage() {
                     }
                   </div>
                 )
-                : <PaperList papers={papers} query={query} isProcessing={!done && !!activeStage} />
+                : <PaperList papers={papers.filter(p => p.stage === 'screening')} query={query} isProcessing={activeStage === 'screening'} />
+            )}
+
+            {activeTab === 'eligibility' && (
+              <EligibilityPaperList
+                papers={papers}
+                query={query}
+              />
             )}
 
             {activeTab === 'report' && report && <ReviewReport content={report} />}

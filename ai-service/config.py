@@ -13,7 +13,7 @@ NESTJS_CALLBACK_URL = os.getenv("NESTJS_CALLBACK_URL", "http://localhost:4000")
 CONTACT_EMAIL       = os.getenv("CONTACT_EMAIL", "your_email@example.com")
 
 # ── Central configuration (configuration.json) ───────────────────────────────
-_ROOT = Path(__file__).parent.parent
+_ROOT = Path(__file__).parent
 _cfg_path = _ROOT / "configuration.json"
 
 def _load() -> dict:
@@ -24,11 +24,13 @@ def _load() -> dict:
 
 _cfg = _load()
 
-# Agent models
-_agents      = _cfg.get("agents", {})
-SEARCH_MODEL = _agents.get("identification", "gemini-2.5-flash-lite")
-REVIEW_MODEL = _agents.get("eligibility",    "claude-sonnet-4-6")
-WRITER_MODEL = _agents.get("writer",         "claude-opus-4-7")
+# Agent models — set in configuration.json agents section
+_agents            = _cfg.get("agents", {})
+SEARCH_MODEL       = _agents.get("identification", "gemini-2.5-flash-lite")
+SCREENING_MODEL    = _agents.get("screening",      "gemini-2.5-flash-lite")
+ELIGIBILITY_MODEL  = _agents.get("eligibility",    "gemini-2.5-flash")
+EXTRACTION_MODEL   = _agents.get("extraction",     "gemini-2.5-flash")
+WRITER_MODEL       = _agents.get("writer",         "gemini-2.5-flash")
 
 # Search
 _search = _cfg.get("search", {})

@@ -13,6 +13,12 @@ class PaperInfo(TypedDict):
     decision: Optional[str]   # INCLUDE | EXCLUDE
     reason: Optional[str]
     extracted_data: Optional[Dict[str, Any]]
+    # Full-text access URLs (preserved through all pipeline stages)
+    pmc_url: Optional[str]
+    doi_url: Optional[str]
+    open_access_pdf: Optional[str]
+    arxiv_url: Optional[str]
+    pubmed_url: Optional[str]
 
 
 class PrismaStats(TypedDict, total=False):

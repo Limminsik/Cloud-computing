@@ -18,6 +18,7 @@ interface Props {
   completedStages: Set<PrismaStage>;
   activeStage: PrismaStage | null;
   onRunStage: (stage: PrismaStage, criteria: string[]) => void;
+  onSelectStage?: (tab: 'identified' | 'papers' | 'report', stageFilter?: string) => void;
 }
 
 function VLine({ active }: { active?: boolean }) {
@@ -43,7 +44,7 @@ function Row({
   );
 }
 
-export default function Prisma2020Diagram({ stats, completedStages, activeStage, onRunStage }: Props) {
+export default function Prisma2020Diagram({ stats, completedStages, activeStage, onRunStage, onSelectStage }: Props) {
   const [inputs, setInputs] = useState({ screening: '', eligibility: '', inclusion: '' });
 
   const id  = completedStages.has('identification');
@@ -69,18 +70,23 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
     onRunStage(stage, criteria);
   };
 
+  const clickable = (tab: 'identified' | 'papers' | 'report', enabled: boolean) =>
+    enabled && onSelectStage
+      ? { onClick: () => onSelectStage(tab), className: 'cursor-pointer' }
+      : {};
+
   return (
     <div className="select-none">
       <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-widest mb-4">PRISMA 2020</p>
 
       {/* ── Identification ── */}
       <p className="text-[9px] text-gray-400 uppercase tracking-wider mb-1">Identification</p>
-      <div className="border border-gray-100 rounded-md px-2.5 py-2 space-y-0.5">
+      <div {...clickable('identified', id)} className={`border border-gray-100 rounded-md px-2.5 py-2 space-y-0.5 ${id && onSelectStage ? 'cursor-pointer hover:border-blue-200 hover:bg-blue-50/30 transition-colors' : ''}`}>
         <Row label="Records identified" n={id ? stats.identified : null} active={id} />
         <Row label="Duplicates removed" n={id ? dupes : null} indent active={id && dupes != null} />
       </div>
       <VLine active={id} />
-      <div className="border border-gray-100 rounded-md px-2.5 py-2">
+      <div {...clickable('identified', id)} className={`border border-gray-100 rounded-md px-2.5 py-2 ${id && onSelectStage ? 'cursor-pointer hover:border-blue-200 hover:bg-blue-50/30 transition-colors' : ''}`}>
         <Row label="Records retrieved" n={id ? fetched : null} active={id} />
       </div>
 
@@ -88,9 +94,12 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
 
       {/* ── Screening ── */}
       <p className="text-[9px] text-gray-400 uppercase tracking-wider mb-1">Screening</p>
-      <div className={`border rounded-md px-2.5 py-2 space-y-0.5 transition-colors ${
-        activeStage === 'screening' ? 'border-blue-200' : 'border-gray-100'
-      }`}>
+      <div
+        {...clickable('papers', sc)}
+        className={`border rounded-md px-2.5 py-2 space-y-0.5 transition-colors ${
+          activeStage === 'screening' ? 'border-blue-200' : 'border-gray-100'
+        } ${sc && onSelectStage ? 'cursor-pointer hover:border-blue-200 hover:bg-blue-50/30' : ''}`}
+      >
         <Row label="Records screened" n={id ? fetched : null} active={sc || activeStage === 'screening'} />
         <Row label="Records excluded" n={excScreen} indent active={sc} />
         <Row label="Reports sought" n={sc ? stats.screened : null} active={sc} />
@@ -116,9 +125,12 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
 
       {/* ── Eligibility ── */}
       <p className="text-[9px] text-gray-400 uppercase tracking-wider mb-1">Eligibility</p>
-      <div className={`border rounded-md px-2.5 py-2 space-y-0.5 transition-colors ${
-        activeStage === 'eligibility' ? 'border-blue-200' : 'border-gray-100'
-      }`}>
+      <div
+        {...(el && onSelectStage ? { onClick: () => onSelectStage('eligibility' as any) } : {})}
+        className={`border rounded-md px-2.5 py-2 space-y-0.5 transition-colors ${
+          activeStage === 'eligibility' ? 'border-blue-200' : 'border-gray-100'
+        } ${el && onSelectStage ? 'cursor-pointer hover:border-blue-200 hover:bg-blue-50/30' : ''}`}
+      >
         <Row label="Reports assessed" n={sc ? stats.screened : null} active={el || activeStage === 'eligibility'} />
         <Row label="Reports excluded" n={excElig} indent active={el} />
       </div>
@@ -143,7 +155,10 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
 
       {/* ── Included ── */}
       <p className="text-[9px] text-gray-400 uppercase tracking-wider mb-1">Included</p>
-      <div className="border border-gray-100 rounded-md px-2.5 py-2 space-y-0.5">
+      <div
+        {...clickable('report', inc)}
+        className={`border border-gray-100 rounded-md px-2.5 py-2 space-y-0.5 ${inc && onSelectStage ? 'cursor-pointer hover:border-blue-200 hover:bg-blue-50/30 transition-colors' : ''}`}
+      >
         <Row label="Studies included" n={inc ? stats.included : null} active={inc} />
         {excInc != null && excInc > 0 && (
           <Row label="Excluded" n={excInc} indent active={inc} />
