@@ -13,10 +13,25 @@ from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger("eligibility_agent")
 
+import hashlib
+from pathlib import Path
+
 from state import ReviewState, PaperInfo
-from config import ELIGIBILITY_MODEL, ELIGIBILITY_CONCURRENT, ELIGIBILITY_MAX_TOKENS, FETCH_FULLTEXT
+from config import ELIGIBILITY_MODEL, ELIGIBILITY_CONCURRENT, ELIGIBILITY_MAX_TOKENS, FETCH_FULLTEXT, PAPERS_DIR
 from utils.fetch_fulltext import fetch_fulltext_with_source
 from utils.llm_factory import get_llm
+
+
+def _load_manual_fulltext(session_id: str, title: str) -> str | None:
+    """Load manually uploaded full text for a paper if available."""
+    safe = hashlib.md5(title.encode()).hexdigest()
+    path = PAPERS_DIR / session_id / f"{safe}_manual.txt"
+    if path.exists():
+        try:
+            return path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+    return None
 
 ELIGIBILITY_PROMPT = """You are a senior systematic review methodologist performing PRISMA 2020 eligibility assessment.
 
@@ -37,34 +52,37 @@ Venue: {venue}
 
 ## Task
 Carefully assess whether this paper meets eligibility criteria for the systematic review.
+Extract structured information from the content to support report writing.
 
-### Rules by content type:
+### Assessment rules by content type:
 
 **If FULL TEXT is available:**
-- Assess methodology, population, outcomes, and study design rigorously.
+- Assess methodology, population, outcomes rigorously.
 - INCLUDE only if the paper clearly addresses the research question with appropriate methods.
 - EXCLUDE if design is inappropriate, population is out of scope, or outcomes are irrelevant.
 
 **If ABSTRACT ONLY is available:**
-- This paper could NOT be retrieved in full text — assess conservatively.
-- INCLUDE only if the abstract explicitly demonstrates relevance AND adequate study design.
-- EXCLUDE if the abstract is vague, insufficient to judge eligibility, or clearly out of scope.
-- Do NOT give benefit of the doubt — that was already done in the screening stage.
+- Assess conservatively — no benefit of the doubt.
+- INCLUDE only if relevance AND study design are explicitly demonstrated.
+- EXCLUDE if vague, insufficient, or clearly out of scope.
 
-### Dimensions to evaluate:
-1. **Relevance** — Does the paper directly address the research question?
-2. **Study design** — Is the methodology appropriate and identifiable?
-3. **Population/Scope** — Is the population/setting relevant?
-4. **Outcomes** — Are outcomes of interest reported?
-5. **Language** — English or Korean only.
+### Article type classification:
+Classify as one of: Original Article | Review | Systematic Review | Meta-analysis | Case Report | Editorial | Letter | Conference Paper | Other
 
-## Output (JSON only — no markdown)
+## Output (JSON only — no markdown, no code fences)
 {{
   "decision": "INCLUDE" or "EXCLUDE",
-  "reason": "<2–3 sentences explaining the decision, citing specific evidence from the content>",
-  "study_design": "<RCT | Cohort | Cross-sectional | Case-control | Systematic Review | Meta-analysis | Other | Unknown>",
-  "confidence": "high" | "moderate" | "low",
-  "full_text_available": true or false
+  "exclude_reason_category": "study_design" | "population" | "outcome" | "language" | "duplicate" | "other" | null,
+  "reason": "<2–3 sentences citing specific evidence from the content>",
+  "article_type": "<Original Article | Review | Systematic Review | Meta-analysis | Case Report | Editorial | Letter | Conference Paper | Other>",
+  "pico": {{
+    "population": "<study population, sample size if available, or null>",
+    "intervention": "<intervention or exposure, or null>",
+    "comparison": "<comparison/control group, or null>",
+    "outcome": "<primary outcomes measured, or null>"
+  }},
+  "key_findings": "<1–2 sentences summarising the main results, or null if excluded>",
+  "limitations": "<key limitations mentioned, or null>"
 }}
 """
 
@@ -74,19 +92,27 @@ async def _assess_one(
     paper: PaperInfo,
     query: str,
     criteria_block: str,
+    session_id: str = "",
 ) -> dict:
-    """Fetch full text (using all available URL fields) then ask Claude."""
+    """Fetch full text (manual upload first, then auto strategies) then assess."""
     abstract = paper.get("abstract", "") or ""
 
-    # Log which URL fields are available for debugging
-    url_fields = {k: paper.get(k) for k in ("url", "pmc_url", "doi_url", "open_access_pdf", "arxiv_url", "pubmed_url")}
-    available = {k: v for k, v in url_fields.items() if v}
-    logger.info(f"[EligibilityAgent] URL fields for '{paper['title'][:50]}': {list(available.keys()) or 'NONE'}")
-
-    # Pass full paper dict so fetch_fulltext can try all URL strategies
-    full_text, full_text_source = await asyncio.get_running_loop().run_in_executor(
-        None, lambda: fetch_fulltext_with_source(dict(paper))
-    ) if FETCH_FULLTEXT else (None, None)
+    # 1. Check for manually uploaded full text first
+    manual_text = _load_manual_fulltext(session_id, paper["title"]) if session_id else None
+    if manual_text:
+        full_text        = manual_text
+        full_text_source = "수동 업로드"
+        logger.info(f"[EligibilityAgent] Using manual upload for: {paper['title'][:60]}")
+    elif FETCH_FULLTEXT:
+        # 2. Auto-fetch via URL strategies
+        url_fields = {k: paper.get(k) for k in ("url", "pmc_url", "doi_url", "open_access_pdf", "arxiv_url", "pubmed_url")}
+        available  = {k: v for k, v in url_fields.items() if v}
+        logger.info(f"[EligibilityAgent] URL fields for '{paper['title'][:50]}': {list(available.keys()) or 'NONE'}")
+        full_text, full_text_source = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: fetch_fulltext_with_source(dict(paper))
+        )
+    else:
+        full_text, full_text_source = None, None
 
     if full_text:
         content = full_text
@@ -186,52 +212,72 @@ async def eligibility_agent(
             "message": f"전문 확보 및 적격성 평가 중 ({batch_start + 1}–{batch_end} / {len(papers)}건)...",
         })
 
-        tasks = [_assess_one(llm, p, query, criteria_block) for p in batch]
+        sid = state.get("session_id", "")
+        tasks = [_assess_one(llm, p, query, criteria_block, sid) for p in batch]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for p, result in zip(batch, results):
             if isinstance(result, Exception):
-                decision = "INCLUDE"
-                reason = f"평가 오류 → 보수적 포함 처리: {result}"
-                study_design, confidence, ft = "Unknown", "low", False
+                decision              = "INCLUDE"
+                reason                = f"평가 오류 → 보수적 포함 처리: {result}"
+                exclude_reason_cat    = None
+                article_type          = "Other"
+                pico                  = {}
+                key_findings          = None
+                limitations           = None
+                ft                    = False
                 ft_source, ft_snippet = None, None
             else:
-                decision    = result.get("decision", "INCLUDE")
-                reason      = result.get("reason", "")
-                study_design = result.get("study_design", "Unknown")
-                confidence  = result.get("confidence", "low")
-                ft          = result.get("full_text_available", False)
-                ft_source   = result.get("full_text_source")
-                ft_snippet  = result.get("full_text_snippet")
+                decision           = result.get("decision", "INCLUDE")
+                reason             = result.get("reason", "")
+                exclude_reason_cat = result.get("exclude_reason_category")
+                article_type       = result.get("article_type", "Other")
+                pico               = result.get("pico") or {}
+                key_findings       = result.get("key_findings")
+                limitations        = result.get("limitations")
+                ft                 = result.get("full_text_available", False)
+                ft_source          = result.get("full_text_source")
+                ft_snippet         = result.get("full_text_snippet")
                 if ft:
                     full_text_count += 1
 
+            extracted_data = {
+                "article_type":          article_type,
+                "exclude_reason_category": exclude_reason_cat,
+                "pico":                  pico,
+                "key_findings":          key_findings,
+                "limitations":           limitations,
+                "full_text_available":   ft,
+                "full_text_source":      ft_source,
+                "full_text_snippet":     ft_snippet,
+            }
+
             updated: PaperInfo = {
                 **p,
-                "decision":     decision,
-                "reason":       reason,
-                "prisma_stage": "eligible",
-                "extracted_data": {
-                    "study_design":        study_design,
-                    "confidence":          confidence,
-                    "full_text_available": ft,
-                    "full_text_source":    ft_source,
-                    "full_text_snippet":   ft_snippet,
-                },
+                "decision":       decision,
+                "reason":         reason,
+                "prisma_stage":   "eligible",
+                "extracted_data": extracted_data,
             }
             eligible.append(updated)
+
             await emit({
-                "type":               "paper_decision",
-                "title":              p["title"],
-                "decision":           decision,
-                "reason":             reason,
-                "stage":              "eligibility",
-                "url":                p.get("url"),
-                "study_design":       study_design,
-                "confidence":         confidence,
-                "full_text_available": ft,
-                "full_text_source":   ft_source,
-                "full_text_snippet":  ft_snippet,
+                "type":                    "paper_decision",
+                "title":                   p["title"],
+                "decision":                decision,
+                "reason":                  reason,
+                "stage":                   "eligibility",
+                "url":                     p.get("url"),
+                "year":                    p.get("year"),
+                "venue":                   p.get("venue"),
+                "exclude_reason_category": exclude_reason_cat,
+                "article_type":            article_type,
+                "pico":                    pico,
+                "key_findings":            key_findings,
+                "limitations":             limitations,
+                "full_text_available":     ft,
+                "full_text_source":        ft_source,
+                "full_text_snippet":       ft_snippet,
             })
 
             if decision == "INCLUDE":

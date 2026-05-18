@@ -5,13 +5,15 @@ import json
 import logging
 import re
 
+import hashlib
+
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from config import NESTJS_CALLBACK_URL
+from config import NESTJS_CALLBACK_URL, PAPERS_DIR
 from state import ReviewState
 from graph.pipeline import prisma_graph, get_config, register_emitter, unregister_emitter
 from agents.search_agent import generate_search_terms
@@ -491,17 +493,22 @@ async def stream_events(session_id: str):
             for p in vals.get("eligible_papers", []):
                 ed = p.get("extracted_data") or {}
                 replay_events.append({
-                    "type":                "paper_decision",
-                    "title":               p.get("title", ""),
-                    "decision":            p.get("decision", ""),
-                    "reason":              p.get("reason", ""),
-                    "stage":               "eligibility",
-                    "url":                 p.get("url"),
-                    "study_design":        ed.get("study_design"),
-                    "confidence":          ed.get("confidence"),
-                    "full_text_available": ed.get("full_text_available"),
-                    "full_text_source":    ed.get("full_text_source"),
-                    "full_text_snippet":   ed.get("full_text_snippet"),
+                    "type":                    "paper_decision",
+                    "title":                   p.get("title", ""),
+                    "decision":                p.get("decision", ""),
+                    "reason":                  p.get("reason", ""),
+                    "stage":                   "eligibility",
+                    "url":                     p.get("url"),
+                    "year":                    p.get("year"),
+                    "venue":                   p.get("venue"),
+                    "article_type":            ed.get("article_type"),
+                    "exclude_reason_category": ed.get("exclude_reason_category"),
+                    "pico":                    ed.get("pico"),
+                    "key_findings":            ed.get("key_findings"),
+                    "limitations":             ed.get("limitations"),
+                    "full_text_available":     ed.get("full_text_available"),
+                    "full_text_source":        ed.get("full_text_source"),
+                    "full_text_snippet":       ed.get("full_text_snippet"),
                 })
 
             if vals.get("prisma_stats"):
@@ -569,6 +576,91 @@ async def _ensure_identified_saved(session_id: str, identified: list, prisma_sta
                     logger.info(f"[{session_id}] Synced {len(identified)} identified papers to DB on SSE connect")
     except Exception as e:
         logger.warning(f"[{session_id}] Could not sync identified papers: {e}")
+
+
+def _paper_fulltext_path(session_id: str, title: str):
+    """Returns the file path for a manually uploaded paper's full text."""
+    safe = hashlib.md5(title.encode()).hexdigest()
+    session_dir = PAPERS_DIR / session_id
+    session_dir.mkdir(exist_ok=True)
+    return session_dir / f"{safe}_manual.txt"
+
+
+@app.post("/sessions/{session_id}/fulltext")
+async def upload_paper_fulltext(
+    session_id: str,
+    file: UploadFile = File(...),
+    title: str = Form(...),
+):
+    """Accept a PDF upload for a specific paper, extract text, and store it."""
+    try:
+        from io import BytesIO
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            raise HTTPException(status_code=500, detail="pypdf not installed")
+
+        content = await file.read()
+        reader = PdfReader(BytesIO(content))
+        text = " ".join(page.extract_text() or "" for page in reader.pages[:30])
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        if not text or len(text) < 100:
+            raise HTTPException(status_code=422, detail="PDF에서 텍스트를 추출할 수 없습니다. 스캔 PDF이거나 보호된 파일일 수 있습니다.")
+
+        path = _paper_fulltext_path(session_id, title)
+        path.write_text(text, encoding="utf-8")
+        # Save title alongside so fulltext-status can map md5 → title
+        title_path = path.with_suffix(".title")
+        title_path.write_text(title, encoding="utf-8")
+        logger.info(f"[{session_id}] Manual fulltext saved for '{title[:50]}' — {len(text)} chars")
+
+        return {
+            "status": "ok",
+            "chars": len(text),
+            "preview": text[:300],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[{session_id}] PDF upload error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sessions/{session_id}/fulltext-status")
+async def get_fulltext_status(session_id: str):
+    """Return manual full-text upload status for all papers in a session."""
+    session_dir = PAPERS_DIR / session_id
+    if not session_dir.exists():
+        return {"papers": []}
+
+    results = []
+    for path in session_dir.glob("*_manual.txt"):
+        try:
+            text = path.read_text(encoding="utf-8")
+            title_path = path.with_suffix(".title")
+            title = title_path.read_text(encoding="utf-8") if title_path.exists() else None
+            results.append({
+                "title":   title,
+                "chars":   len(text),
+                "preview": text[:200],
+            })
+        except Exception:
+            pass
+    return {"papers": results}
+
+
+@app.delete("/sessions/{session_id}/fulltext")
+async def delete_paper_fulltext(session_id: str, title: str):
+    """Delete a manually uploaded full text for a paper."""
+    path = _paper_fulltext_path(session_id, title)
+    if path.exists():
+        path.unlink()
+        title_path = path.with_suffix(".title")
+        if title_path.exists():
+            title_path.unlink()
+        return {"status": "deleted"}
+    raise HTTPException(status_code=404, detail="전문 파일을 찾을 수 없습니다.")
 
 
 @app.get("/sessions/{session_id}/state")

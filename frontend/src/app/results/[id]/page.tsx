@@ -8,6 +8,7 @@ import HeaderSearchBar from '@/components/HeaderSearchBar';
 import LiveLog, { LogEntry } from '@/components/LiveLog';
 import PaperList, { PaperDecision } from '@/components/PaperList';
 import EligibilityPaperList from '@/components/EligibilityPaperList';
+import FulltextPanel from '@/components/FulltextPanel';
 import IdentifiedPaperList, { IdentifiedPaper } from '@/components/IdentifiedPaperList';
 import ReviewReport from '@/components/ReviewReport';
 import Prisma2020Diagram, { PrismaStage } from '@/components/Prisma2020Diagram';
@@ -87,7 +88,7 @@ export default function ResultsPage() {
   const [query, setQuery]             = useState('');
   const [keywords, setKeywords]       = useState<string[]>([]);
   const [booleanQuery, setBooleanQuery] = useState('');
-  const [activeTab, setActiveTab]     = useState<'identified' | 'papers' | 'eligibility' | 'report'>('identified');
+  const [activeTab, setActiveTab]     = useState<'identified' | 'papers' | 'fulltext' | 'eligibility' | 'report'>('identified');
   const [identifiedPapers, setIdentifiedPapers] = useState<IdentifiedPaper[]>([]);
   const [completedStages, setCompletedStages]   = useState<Set<PrismaStage>>(new Set());
   const [activeStage, setActiveStage]           = useState<PrismaStage | null>(null);
@@ -140,11 +141,14 @@ export default function ResultsPage() {
             stage:               (p.prismaStage === 'eligible' || p.prismaStage === 'included')
                                ? 'eligibility' : 'screening',
             url:                 p.url      ?? null,
-            study_design:        (p.extractedData as any)?.study_design        ?? null,
-            confidence:          (p.extractedData as any)?.confidence          ?? null,
-            full_text_available: (p.extractedData as any)?.full_text_available ?? null,
-            full_text_source:    (p.extractedData as any)?.full_text_source    ?? null,
-            full_text_snippet:   (p.extractedData as any)?.full_text_snippet   ?? null,
+            article_type:            (p.extractedData as any)?.article_type            ?? null,
+            exclude_reason_category: (p.extractedData as any)?.exclude_reason_category ?? null,
+            pico:                    (p.extractedData as any)?.pico                    ?? null,
+            key_findings:            (p.extractedData as any)?.key_findings            ?? null,
+            limitations:             (p.extractedData as any)?.limitations             ?? null,
+            full_text_available:     (p.extractedData as any)?.full_text_available     ?? null,
+            full_text_source:        (p.extractedData as any)?.full_text_source        ?? null,
+            full_text_snippet:       (p.extractedData as any)?.full_text_snippet       ?? null,
           })));
 
           const dbStages = new Set<PrismaStage>(['identification']);
@@ -233,11 +237,16 @@ export default function ResultsPage() {
           reason:              event.reason              as string,
           stage:               event.stage               as string,
           url:                 event.url                 as string | null | undefined,
-          study_design:        event.study_design        as string | null | undefined,
-          confidence:          event.confidence          as string | null | undefined,
-          full_text_available: event.full_text_available as boolean | null | undefined,
-          full_text_source:    event.full_text_source    as string | null | undefined,
-          full_text_snippet:   event.full_text_snippet   as string | null | undefined,
+          year:                    event.year                    as number | null | undefined,
+          venue:                   event.venue                   as string | null | undefined,
+          article_type:            event.article_type            as string | null | undefined,
+          exclude_reason_category: event.exclude_reason_category as string | null | undefined,
+          pico:                    event.pico                    as PaperDecision['pico'],
+          key_findings:            event.key_findings            as string | null | undefined,
+          limitations:             event.limitations             as string | null | undefined,
+          full_text_available:     event.full_text_available     as boolean | null | undefined,
+          full_text_source:        event.full_text_source        as string | null | undefined,
+          full_text_snippet:       event.full_text_snippet       as string | null | undefined,
         }]);
         setActiveTab(prev => prev === 'identified' ? 'papers' : prev);
       }
@@ -363,6 +372,14 @@ export default function ResultsPage() {
                 심사 {papers.filter(p => p.stage === 'screening').length > 0 ? `(${papers.filter(p => p.stage === 'screening').length})` : ''}
               </button>
             )}
+            {completedStages.has('screening') && (
+              <button
+                onClick={() => setActiveTab('fulltext')}
+                className={`px-2.5 py-1 transition-colors ${activeTab === 'fulltext' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                전문 확보
+              </button>
+            )}
             {(papers.some(p => p.stage === 'eligibility') || completedStages.has('screening')) && (
               <button
                 onClick={() => setActiveTab('eligibility')}
@@ -451,6 +468,14 @@ export default function ResultsPage() {
                   </div>
                 )
                 : <PaperList papers={papers.filter(p => p.stage === 'screening')} query={query} isProcessing={activeStage === 'screening'} />
+            )}
+
+            {activeTab === 'fulltext' && (
+              <FulltextPanel
+                sessionId={sessionId}
+                papers={papers}
+                onReady={() => { handleRunStage('eligibility', []); setActiveTab('eligibility'); }}
+              />
             )}
 
             {activeTab === 'eligibility' && (
