@@ -215,9 +215,6 @@ function IncludedCard({ paper, query }: { paper: PaperDecision; query: string })
                 <p className="text-[11px] text-gray-600 leading-relaxed whitespace-pre-wrap font-mono">
                   {paper.full_text_snippet}
                 </p>
-                <p className="text-[10px] text-gray-400 mt-1.5">
-                  ※ 실제 평가는 최대 12,000자 기준으로 수행됨
-                </p>
               </div>
             )}
           </div>
