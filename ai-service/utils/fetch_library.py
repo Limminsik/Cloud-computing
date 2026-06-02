@@ -21,7 +21,11 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger("fetch_library")
 
+# Docker: /app/configuration.json (mounted from repo root)
+# Local:  ai-service/../configuration.json
 CONFIG_PATH = Path(__file__).parent.parent / "configuration.json"
+if not CONFIG_PATH.exists():
+    CONFIG_PATH = Path(__file__).parent.parent.parent / "configuration.json"
 LIBRARY_SEARCH = "https://lib.gachon.ac.kr/searchTotal/result"
 LIBRARY_LOGIN  = "https://lib.gachon.ac.kr/Account/LogOn"
 
