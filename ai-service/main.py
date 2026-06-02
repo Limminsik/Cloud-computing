@@ -678,6 +678,77 @@ async def delete_paper_fulltext(session_id: str, title: str):
     raise HTTPException(status_code=404, detail="전문 파일을 찾을 수 없습니다.")
 
 
+@app.get("/library/diagnose")
+async def diagnose_library():
+    """Diagnose library login page — returns HTML form info and screenshot path."""
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return {"error": "playwright not installed"}
+
+    from utils.fetch_library import _load_config, LIBRARY_BASE, LIBRARY_LOGIN
+    cfg  = _load_config()
+    lib  = cfg.get("library", {})
+    user = lib.get("username", "")
+
+    result: dict = {}
+
+    async def _run():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            page = await browser.new_page()
+            try:
+                # 1. Check library homepage
+                resp = await page.goto(LIBRARY_BASE, timeout=15000)
+                result["homepage_status"] = resp.status if resp else None
+                result["homepage_url"]    = page.url
+
+                # 2. Check login page
+                resp2 = await page.goto(LIBRARY_LOGIN, timeout=15000)
+                result["login_page_status"] = resp2.status if resp2 else None
+                result["login_page_url"]    = page.url
+
+                await page.wait_for_load_state("networkidle", timeout=8000)
+
+                # 3. Find all input fields on login page
+                inputs = await page.evaluate("""() =>
+                    Array.from(document.querySelectorAll('input')).map(i => ({
+                        type: i.type, name: i.name, id: i.id,
+                        placeholder: i.placeholder, className: i.className.slice(0, 60)
+                    }))
+                """)
+                result["login_inputs"] = inputs
+
+                # 4. Find all form actions
+                forms = await page.evaluate("""() =>
+                    Array.from(document.querySelectorAll('form')).map(f => ({
+                        action: f.action, method: f.method, id: f.id
+                    }))
+                """)
+                result["login_forms"] = forms
+
+                # 5. Save screenshot
+                screenshot_path = "/tmp/library_login.png"
+                await page.screenshot(path=screenshot_path, full_page=True)
+                result["screenshot"] = screenshot_path
+
+                # 6. Try login if credentials available
+                if user:
+                    result["credentials_configured"] = True
+                    # Try to find ANY text or password input
+                    all_inputs = await page.query_selector_all("input[type='text'], input[type='email'], input:not([type])")
+                    pw_inputs  = await page.query_selector_all("input[type='password']")
+                    result["text_input_count"] = len(all_inputs)
+                    result["password_input_count"] = len(pw_inputs)
+                else:
+                    result["credentials_configured"] = False
+            finally:
+                await browser.close()
+
+    await _run()
+    return result
+
+
 @app.get("/sessions/{session_id}/state")
 async def get_session_state(session_id: str):
     """Return current LangGraph state snapshot for a session."""

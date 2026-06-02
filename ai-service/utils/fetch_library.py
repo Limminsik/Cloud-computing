@@ -167,10 +167,21 @@ def fetch_from_library(title: str) -> Optional[str]:
     pwd  = lib.get("password", "")
 
     try:
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(_playwright_fetch(title, user, pwd))
-        loop.close()
-        return result
+        # Must run in a fresh thread with its own event loop
+        # (caller is already inside run_in_executor, so we can't reuse the running loop)
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_run_in_new_loop, title, user, pwd)
+            return future.result(timeout=60)
     except Exception as e:
         logger.warning("[Library] fetch_from_library error: %s", e)
         return None
+
+
+def _run_in_new_loop(title: str, username: str, password: str) -> Optional[str]:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_playwright_fetch(title, username, password))
+    finally:
+        loop.close()
