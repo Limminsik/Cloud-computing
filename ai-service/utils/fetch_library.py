@@ -186,46 +186,76 @@ async def _playwright_fetch(title: str, username: str, password: str) -> Optiona
                     logger.debug("[Library]   link: %s  %s", lnk.get("href","")[:60], lnk.get("text",""))
                 return None
 
-            # ── Step 4: Follow Full Text link ─────────────────────────────────
-            logger.info("[Library] Navigating to Full Text: %s", ft_url[:80])
-            resp = await page.goto(ft_url, timeout=25000)
-            await page.wait_for_load_state("networkidle", timeout=15000)
-            logger.info("[Library] Final URL after redirect: %s", page.url)
+            # ── Step 4: Click Full Text link — opens in new tab (target="_blank") ──
+            logger.info("[Library] Clicking Full Text link: %s", ft_url[:80])
+            try:
+                # Capture the new tab that opens
+                async with ctx.expect_page() as new_page_info:
+                    # Click the link element on the current page
+                    await page.click(
+                        f'a[href*="directLink"], a[href*="eds/directLink"]',
+                        timeout=8000,
+                    )
+                new_page = await new_page_info.value
+                await new_page.wait_for_load_state("networkidle", timeout=20000)
+                final_url = new_page.url
+                logger.info("[Library] New tab URL: %s", final_url)
 
-            ct = (resp.headers.get("content-type", "") if resp else "") or ""
-            if "pdf" in ct or page.url.lower().endswith(".pdf"):
-                raw = await resp.body()
-                text = _extract_text_from_pdf_bytes(raw)
-                if text:
-                    logger.info("[Library] PDF extracted %d chars", len(text))
+                # Detect if we landed on a login/error page
+                page_title = await new_page.title()
+                if any(kw in final_url + page_title for kw in ["login", "로그인", "error", "Error"]):
+                    logger.warning("[Library] Redirected to login/error page — session issue")
+                    await new_page.close()
+                    return None
+
+                # Check for PDF
+                if final_url.lower().endswith(".pdf") or "pdf" in final_url.lower():
+                    pdf_bytes = await new_page.pdf()
+                    text = _extract_text_from_pdf_bytes(pdf_bytes)
+                    if text:
+                        logger.info("[Library] PDF extracted %d chars", len(text))
+                        await new_page.close()
+                        return text[:12000]
+
+                # Extract main content from publisher page
+                text = await new_page.evaluate("""() => {
+                    ['script','style','nav','header','footer','aside',
+                     '.cookie-banner','.ad','.sidebar','.site-header',
+                     '#globalNav','#divHeader','.divHeader'].forEach(sel =>
+                        document.querySelectorAll(sel).forEach(el => el.remove())
+                    );
+                    const candidates = [
+                        'article', 'main', '.article-body', '.article-content',
+                        '#article', '#articleBody', '.fulltext', '.hlFld-Fulltext',
+                        '#abstract', '.abstract', '.abstractSection',
+                        '.NLM_p', '.body', '.content-box',
+                    ];
+                    for (const sel of candidates) {
+                        const el = document.querySelector(sel);
+                        if (el && el.innerText.trim().length > 400)
+                            return el.innerText.replace(/\\s+/g, ' ').trim();
+                    }
+                    // Last resort — get body but skip short pages (likely error/login)
+                    const body = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
+                    return body.length > 500 ? body : '';
+                }""")
+
+                await new_page.close()
+
+                if text and len(text) > 400:
+                    logger.info("[Library] Extracted %d chars from publisher page: %s",
+                                len(text), final_url[:60])
                     return text[:12000]
 
-            # Extract main text from publisher page
-            text = await page.evaluate("""() => {
-                ['script','style','nav','header','footer','aside',
-                 '.cookie-banner','.ad','.sidebar'].forEach(sel =>
-                    document.querySelectorAll(sel).forEach(el => el.remove())
-                );
-                const candidates = [
-                    'article', 'main', '.article-body', '.article-content',
-                    '#article', '#articleBody', '.fulltext', '.body',
-                    '#abstract', '.abstract', '.paper-body',
-                ];
-                for (const sel of candidates) {
-                    const el = document.querySelector(sel);
-                    if (el && el.innerText.trim().length > 400)
-                        return el.innerText.replace(/\\s+/g, ' ').trim();
-                }
-                const body = document.body?.innerText || '';
-                return body.replace(/\\s+/g, ' ').trim();
-            }""")
+                logger.info("[Library] Page too short or empty at: %s", final_url)
+                return None
 
-            if text and len(text) > 300:
-                logger.info("[Library] HTML extracted %d chars from publisher page", len(text))
-                return text[:12000]
-
-            logger.info("[Library] Could not extract text from publisher page: %s", page.url)
-            return None
+            except PWTimeout:
+                logger.info("[Library] No directLink element found to click for: %s", title[:60])
+                return None
+            except Exception as e:
+                logger.warning("[Library] New-tab click failed: %s", e)
+                return None
 
         except Exception as e:
             logger.warning("[Library] Error: %s", e)
