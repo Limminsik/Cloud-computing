@@ -187,6 +187,16 @@ async def _playwright_fetch(title: str, username: str, password: str) -> Optiona
                 return None
 
             # ── Step 4: Open Full Text in new page (same context = shared cookies) ──
+            # If it's an outlink URL, decode the targetUrl parameter and go there directly
+            from urllib.parse import urlparse, parse_qs, unquote
+            parsed = urlparse(ft_url)
+            if parsed.path.endswith("/outlink") or "outlink" in parsed.path:
+                qs = parse_qs(parsed.query)
+                target = qs.get("targetUrl", [None])[0]
+                if target:
+                    ft_url = unquote(target)
+                    logger.info("[Library] Decoded outlink → %s", ft_url[:80])
+
             logger.info("[Library] Opening Full Text in new tab: %s", ft_url[:80])
             new_page = await ctx.new_page()
             try:
@@ -195,24 +205,34 @@ async def _playwright_fetch(title: str, username: str, password: str) -> Optiona
                 final_url = new_page.url
                 logger.info("[Library] Final URL: %s", final_url)
 
-                # Detect login/error redirect
-                page_title = await new_page.title()
-                low = (final_url + page_title).lower()
-                if any(kw in low for kw in ["login", "로그인", "/login", "logon"]):
-                    logger.warning("[Library] Redirected to login page — institutional access issue")
+                # Detect login redirect — only if the URL PATH contains /login or /logon
+                # (avoid false positive from page titles containing 로그인)
+                final_path = urlparse(final_url).path.lower()
+                if any(kw in final_path for kw in ["/login", "/logon", "/signin", "/account/logon"]):
+                    logger.warning("[Library] Redirected to login URL: %s", final_url[:60])
                     await new_page.close()
                     return None
 
                 # ── PDF download link on the EDS landing page? ──────────────
-                # EDS directLink sometimes shows an intermediate page with a
-                # "Download PDF" or "View PDF" button before the actual PDF.
                 pdf_link = await new_page.evaluate("""() => {
-                    const a = document.querySelector(
-                        'a[href$=".pdf"], a[href*="pdf"], ' +
-                        'a:has-text("PDF"), a:has-text("Download PDF"), ' +
-                        'a[class*="pdf"], a[id*="pdf"]'
+                    // :has-text is Playwright-only — use standard JS filter
+                    const allLinks = Array.from(document.querySelectorAll('a[href]'));
+                    const pdfByHref = allLinks.find(a =>
+                        a.href.endsWith('.pdf') || a.href.includes('/pdf/') ||
+                        a.href.includes('pdf=') || a.href.includes('type=pdf')
                     );
-                    return a ? a.href : null;
+                    const pdfByText = allLinks.find(a => {
+                        const t = a.innerText.trim().toUpperCase();
+                        return t.includes('PDF') && (
+                            t.includes('DOWNLOAD') || t.includes('FULL') ||
+                            t.includes('VIEW') || t.length < 20
+                        );
+                    });
+                    const pdfByCls = document.querySelector(
+                        'a[class*="pdf"], a[id*="pdf"], a[data-format="pdf"]'
+                    );
+                    const el = pdfByHref || pdfByCls || pdfByText;
+                    return el ? el.href : null;
                 }""")
 
                 if pdf_link:
