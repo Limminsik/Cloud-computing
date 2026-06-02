@@ -279,6 +279,28 @@ export default function ResultsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stats.identified]);
 
+  // done=true 인데 report가 없으면 최대 10초간 polling
+  useEffect(() => {
+    if (!done || report) return;
+    let attempts = 0;
+    const id = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await fetch(`${NESTJS_URL}/api/sessions/${sessionId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.report?.content) {
+            setReport(data.report.content);
+            clearInterval(id);
+          }
+        }
+      } catch { /* ignore */ }
+      if (attempts >= 5) clearInterval(id);
+    }, 2000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done, report]);
+
   const fetchReport = async () => {
     try {
       const res = await fetch(`${NESTJS_URL}/api/sessions/${sessionId}`);

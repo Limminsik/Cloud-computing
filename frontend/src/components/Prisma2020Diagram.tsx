@@ -184,13 +184,8 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
         )}
       </div>
 
-      {canRun('writer') && (
-        <div className="mt-1.5 space-y-1">
-          <button onClick={() => handleRun('writer')}
-            className="w-full text-[10px] font-semibold py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
-            보고서 작성 시작 →
-          </button>
-        </div>
+      {el && !done && activeStage === 'inclusion' && (
+        <p className="text-[9px] text-blue-400 animate-pulse text-center mt-1">보고서 작성 중...</p>
       )}
       {done && (
         <button onClick={() => onSelectStage?.('report')}
