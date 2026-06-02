@@ -67,6 +67,30 @@ def _extract_text_from_pdf_bytes(content: bytes) -> Optional[str]:
         return None
 
 
+async def _login_on_page(page, username: str, password: str) -> bool:
+    """If the current page has a library login form, fill and submit it."""
+    try:
+        from playwright.async_api import TimeoutError as PWTimeout
+        # Detect login form by looking for the id input field
+        id_input = await page.query_selector("input#id, input[name='id'][type='text']")
+        if not id_input:
+            return False
+        logger.info("[Library] Re-login form detected at %s", page.url[:60])
+        try:
+            await page.click("text=도서관ID", timeout=3000)
+        except Exception:
+            pass
+        await page.fill("input#id", username)
+        await page.fill("input[type='password']", password)
+        await page.click("button:has-text('로그인')")
+        await page.wait_for_load_state("networkidle", timeout=15000)
+        logger.info("[Library] Re-login complete, now at: %s", page.url[:60])
+        return True
+    except Exception as e:
+        logger.debug("[Library] Re-login attempt failed: %s", e)
+        return False
+
+
 async def _playwright_fetch(title: str, username: str, password: str) -> Optional[str]:
     try:
         from playwright.async_api import async_playwright, TimeoutError as PWTimeout
@@ -201,15 +225,20 @@ async def _playwright_fetch(title: str, username: str, password: str) -> Optiona
             new_page = await ctx.new_page()
             try:
                 await new_page.goto(ft_url, timeout=25000)
-                await new_page.wait_for_load_state("networkidle", timeout=20000)
+                await new_page.wait_for_load_state("networkidle", timeout=15000)
+
+                # Re-login if the page shows a login form (EDS double-auth flow)
+                relogged = await _login_on_page(new_page, username, password)
+                if relogged:
+                    await new_page.wait_for_load_state("networkidle", timeout=15000)
+
                 final_url = new_page.url
                 logger.info("[Library] Final URL: %s", final_url)
 
-                # Detect login redirect — only if the URL PATH contains /login or /logon
-                # (avoid false positive from page titles containing 로그인)
+                # Hard fail only if still stuck on login path
                 final_path = urlparse(final_url).path.lower()
                 if any(kw in final_path for kw in ["/login", "/logon", "/signin", "/account/logon"]):
-                    logger.warning("[Library] Redirected to login URL: %s", final_url[:60])
+                    logger.warning("[Library] Still on login page after re-login: %s", final_url[:60])
                     await new_page.close()
                     return None
 
