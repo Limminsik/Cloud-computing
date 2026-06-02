@@ -255,6 +255,16 @@ export default function ResultsPage() {
         const stage = event.stage as PrismaStage;
         setCompletedStages(prev => new Set([...prev, stage]));
         setActiveStage(null);
+
+        // Auto-advance pipeline
+        if (stage === 'identification') {
+          // Identification → Screening 자동 시작
+          setTimeout(() => handleRunStage('screening', []), 800);
+        } else if (stage === 'screening') {
+          // Screening → Eligibility 자동 시작 (library fetch 포함)
+          setTimeout(() => handleRunStage('eligibility', []), 800);
+          // Eligibility → Writer 는 파이프라인에서 자동 연결됨
+        }
       }
 
       if (type === 'pipeline_done') {

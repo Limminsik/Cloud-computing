@@ -106,20 +106,8 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
         <Row label="Reports sought" n={sc ? stats.screened : null} active={sc} />
       </div>
 
-      {canRun('screening') && (
-        <div className="mt-1.5 space-y-1">
-          <textarea rows={2} value={inputs.screening}
-            onChange={e => setInputs(p => ({ ...p, screening: e.target.value }))}
-            placeholder="포함/제외 기준 (선택)"
-            className="w-full text-[10px] border border-gray-200 rounded px-2 py-1 resize-none focus:outline-none focus:ring-1 focus:ring-gray-300 bg-white placeholder-gray-300" />
-          <button onClick={() => handleRun('screening')}
-            className="w-full text-[10px] font-medium py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
-            Screening 실행
-          </button>
-        </div>
-      )}
       {activeStage === 'screening' && (
-        <p className="text-[9px] text-blue-400 animate-pulse text-center mt-1">진행 중...</p>
+        <p className="text-[9px] text-blue-400 animate-pulse text-center mt-1">심사 진행 중...</p>
       )}
 
       <VLine active={sc} />
@@ -156,13 +144,9 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
 
       {canRun('eligibility') && (
         <div className="mt-1.5 space-y-1">
-          <textarea rows={2} value={inputs.eligibility}
-            onChange={e => setInputs(p => ({ ...p, eligibility: e.target.value }))}
-            placeholder="적격성 기준 (선택)"
-            className="w-full text-[10px] border border-gray-200 rounded px-2 py-1 resize-none focus:outline-none focus:ring-1 focus:ring-gray-300 bg-white placeholder-gray-300" />
           <button onClick={() => handleRun('eligibility')}
             className="w-full text-[10px] font-medium py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
-            Eligibility 실행
+            수동으로 Eligibility 실행
           </button>
         </div>
       )}
