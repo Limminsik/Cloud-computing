@@ -1,23 +1,58 @@
+import { IsString, IsArray, IsOptional, IsObject, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class PaperDto {
+  @IsString()
+  title: string;
+
+  @IsArray()
+  @IsOptional()
+  authors?: string[];
+
+  @IsOptional()
+  year?: number;
+
+  @IsString()
+  @IsOptional()
+  url?: string;
+
+  @IsString()
+  @IsOptional()
+  abstract?: string;
+
+  @IsString()
+  @IsOptional()
+  venue?: string;
+
+  @IsString()
+  @IsOptional()
+  prisma_stage?: string;
+
+  @IsString()
+  @IsOptional()
+  decision?: string;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsObject()
+  @IsOptional()
+  extracted_data?: Record<string, any>;
+}
+
 export class CompleteSessionDto {
-  prisma_stats: {
-    identified: number;
-    screened: number;
-    eligible: number;
-    included: number;
-  };
+  @IsObject()
+  @IsOptional()
+  prisma_stats?: Record<string, number>;
 
-  included_papers: Array<{
-    title: string;
-    authors: string[];
-    year?: number;
-    url?: string;
-    abstract?: string;
-    venue?: string;
-    prisma_stage: string;
-    decision?: string;
-    reason?: string;
-    extracted_data?: Record<string, any>;
-  }>;
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => PaperDto)
+  included_papers?: PaperDto[];
 
-  review_report: string;
+  @IsString()
+  @IsOptional()
+  review_report?: string;
 }
