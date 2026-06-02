@@ -1,15 +1,22 @@
 """Gachon University Central Library full-text fetcher using Playwright.
 
-Confirmed form structure (from browser inspection):
-  - Login URL  : https://lib.gachon.ac.kr/login  (POST)
-  - Login type : radio — "가천대 포털ID" | "도서관ID(학번/사번)"  ← we use 도서관ID
-  - Username   : input#id  (name="id", placeholder="학번, 사번")
-  - Password   : input[type="password"] inside div.logForm.pwForm
-  - Hidden enc : input#encId, input#encPw  (JS encrypts before submit — handled automatically)
-  - Submit btn : 로그인 button (text match)
+Confirmed structure (from browser inspection):
+  Login:
+    - URL    : POST https://lib.gachon.ac.kr/login
+    - id     : input#id  (name="id")
+    - pw     : input[type="password"]
+    - radio  : click "text=도서관ID" first
+    - submit : button:has-text('로그인')
 
-Search URL: https://lib.gachon.ac.kr/searchTotal/result?st=KWRD&si=TOTAL&oi=DISP07&os=ASC&q=...
-Full-text links: <a> tags containing "원문보기" / "Full Text" in search results
+  Search results page:
+    - URL     : GET https://lib.gachon.ac.kr/searchTotal/result?st=KWRD&si=TOTAL&q={title}
+    - Articles: ul#articlesUl  li  (JS-rendered via searchTotal.js)
+    - Title   : li p.listTitle  (or nearby heading)
+    - FT link : li p.link a[href*='directLink']  or  a img[alt*='Full Text']
+
+  Full Text link format:
+    /eds/directLink/{id}?moduleId=eds&linkType=plink  (relative URL on library domain)
+    → redirects to publisher page with institutional access
 """
 
 import asyncio
@@ -23,7 +30,6 @@ from typing import Optional
 
 logger = logging.getLogger("fetch_library")
 
-# Docker: /app/configuration.json  |  Local: repo_root/configuration.json
 CONFIG_PATH = Path(__file__).parent.parent / "configuration.json"
 if not CONFIG_PATH.exists():
     CONFIG_PATH = Path(__file__).parent.parent.parent / "configuration.json"
@@ -40,6 +46,15 @@ def _load_config() -> dict:
         return {}
 
 
+def _title_similarity(a: str, b: str) -> float:
+    """Simple word overlap ratio for fuzzy title matching."""
+    wa = set(re.sub(r"[^a-z0-9가-힣 ]", " ", a.lower()).split())
+    wb = set(re.sub(r"[^a-z0-9가-힣 ]", " ", b.lower()).split())
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / max(len(wa), len(wb))
+
+
 def _extract_text_from_pdf_bytes(content: bytes) -> Optional[str]:
     try:
         from pypdf import PdfReader
@@ -53,7 +68,6 @@ def _extract_text_from_pdf_bytes(content: bytes) -> Optional[str]:
 
 
 async def _playwright_fetch(title: str, username: str, password: str) -> Optional[str]:
-    """Use Playwright to log into Gachon Library and retrieve full text."""
     try:
         from playwright.async_api import async_playwright, TimeoutError as PWTimeout
     except ImportError:
@@ -63,7 +77,8 @@ async def _playwright_fetch(title: str, username: str, password: str) -> Optiona
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+            args=["--no-sandbox", "--disable-dev-shm-usage",
+                  "--disable-blink-features=AutomationControlled"],
         )
         ctx = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -73,137 +88,147 @@ async def _playwright_fetch(title: str, username: str, password: str) -> Optiona
         page = await ctx.new_page()
 
         try:
-            # ── Step 1: Login with 도서관ID ─────────────────────────────────
-            if username and password:
-                logger.info("[Library] Navigating to login page")
-                await page.goto(LIBRARY_LOGIN, timeout=20000)
-                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            # ── Step 1: Login ─────────────────────────────────────────────────
+            logger.info("[Library] Logging in as %s", username)
+            await page.goto(LIBRARY_LOGIN, timeout=20000)
+            await page.wait_for_load_state("domcontentloaded")
 
-                # Select "도서관ID(학번/사번)" radio button
-                # Radio buttons are in div.logTopW — click the one with text "도서관ID"
-                try:
-                    # Try clicking the radio label first
-                    await page.click("text=도서관ID", timeout=5000)
-                    logger.info("[Library] Clicked 도서관ID radio")
-                except PWTimeout:
-                    # If already selected or text not found, try direct radio click
-                    try:
-                        await page.click("input[type='radio']:nth-child(2)", timeout=3000)
-                    except Exception:
-                        pass
+            # Select "도서관ID(학번/사번)" radio
+            try:
+                await page.click("text=도서관ID", timeout=5000)
+            except PWTimeout:
+                pass  # may already be selected
 
-                # Wait for the ID input to be visible
-                await page.wait_for_selector("input#id", timeout=8000)
+            await page.wait_for_selector("input#id", timeout=8000)
+            await page.fill("input#id", username)
+            await page.fill("input[type='password']", password)
+            await page.click("button:has-text('로그인')")
+            await page.wait_for_load_state("networkidle", timeout=15000)
 
-                # Fill username (학번)
-                await page.fill("input#id", username)
-                logger.info("[Library] Filled username")
+            if "/login" in page.url:
+                logger.warning("[Library] Login may have failed (still on /login)")
+            else:
+                logger.info("[Library] Login successful, URL: %s", page.url)
 
-                # Fill password
-                await page.fill("input[type='password']", password)
-                logger.info("[Library] Filled password")
-
-                # Click 로그인 button — JS will encrypt credentials into encId/encPw
-                await page.click("button:has-text('로그인'), input[type='submit']")
-                await page.wait_for_load_state("networkidle", timeout=15000)
-
-                current_url = page.url
-                logger.info("[Library] After login, URL: %s", current_url)
-
-                # Verify login success (should redirect away from /login)
-                if "/login" in current_url:
-                    logger.warning("[Library] Login may have failed — still on login page")
-                else:
-                    logger.info("[Library] Login successful")
-
-            # ── Step 2: Search by paper title ───────────────────────────────
+            # ── Step 2: Search ────────────────────────────────────────────────
             from urllib.parse import urlencode
             params = urlencode({"st": "KWRD", "si": "TOTAL", "oi": "DISP07", "os": "ASC", "q": title})
             search_url = f"{LIBRARY_SEARCH}?{params}"
             logger.info("[Library] Searching: %s", title[:60])
             await page.goto(search_url, timeout=20000)
-            await page.wait_for_load_state("networkidle", timeout=15000)
 
-            # ── Step 3: Find Full Text links ─────────────────────────────────
+            # Wait for JS-rendered article list
             try:
-                await page.wait_for_selector(
-                    "a:has-text('원문'), a:has-text('Full Text'), a:has-text('원문보기')",
-                    timeout=10000,
-                )
+                await page.wait_for_selector("ul#articlesUl li", timeout=20000)
             except PWTimeout:
-                logger.info("[Library] No full-text links found for: %s", title[:60])
+                logger.info("[Library] No articles rendered for: %s", title[:60])
                 return None
 
-            links = await page.evaluate("""() => {
-                const seen = new Set();
-                const results = [];
-                document.querySelectorAll('a').forEach(a => {
-                    const txt  = a.textContent.trim();
-                    const href = a.href;
-                    if (!href || href.startsWith('#') || seen.has(href)) return;
-                    const isOA = txt.includes('Open Access') || txt.includes('오픈액세스');
-                    const isFT = txt.includes('원문') || txt.toLowerCase().includes('full text');
-                    if (isFT || isOA) {
-                        seen.add(href);
-                        results.push({ label: txt, url: href, isOA });
-                    }
-                });
-                return results;
+            # ── Step 3: Find matching article and Full Text link ───────────────
+            title_json = json.dumps(title)
+            match = await page.evaluate(f"""() => {{
+                const target = {title_json}.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').trim();
+                const targetWords = new Set(target.split(/\\s+/).filter(w => w.length > 2));
+
+                const items = document.querySelectorAll('ul#articlesUl > li');
+                let bestScore = 0;
+                let bestResult = null;
+
+                for (const li of items) {{
+                    // Find title text in this result
+                    const titleEl = li.querySelector('p.listTitle, .listTitle, h3, h4, .title, p.title');
+                    const rawTitle = titleEl ? titleEl.innerText : li.innerText.split('\\n')[0];
+                    const norm = rawTitle.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').trim();
+                    const words = new Set(norm.split(/\\s+/).filter(w => w.length > 2));
+
+                    // Word overlap score
+                    let overlap = 0;
+                    for (const w of targetWords) if (words.has(w)) overlap++;
+                    const score = overlap / Math.max(targetWords.size, words.size, 1);
+
+                    if (score > bestScore) {{
+                        bestScore = score;
+                        // Find Full Text link
+                        const ftLink = li.querySelector(
+                            'a[href*="directLink"], a[href*="fulltext"], ' +
+                            'p.link a, .link a'
+                        );
+                        // Try by img alt
+                        const ftImg = li.querySelector('img[alt*="Full Text"], img[alt*="원문"]');
+                        const ftByImg = ftImg ? ftImg.closest('a') : null;
+                        const el = ftLink || ftByImg;
+                        bestResult = {{
+                            score: score,
+                            foundTitle: rawTitle.trim(),
+                            url: el ? el.href : null,
+                            allLinks: Array.from(li.querySelectorAll('a')).map(a => ({{
+                                href: a.href, text: a.innerText.trim().slice(0, 50)
+                            }}))
+                        }};
+                    }}
+                }}
+                return bestScore >= 0.4 ? bestResult : null;
+            }}""")
+
+            if not match:
+                logger.info("[Library] No matching article found (score < 0.4) for: %s", title[:60])
+                return None
+
+            logger.info("[Library] Matched '%s' (score=%.2f), FT URL: %s",
+                        match.get("foundTitle", "")[:60], match.get("score", 0),
+                        (match.get("url") or "")[:80])
+
+            ft_url = match.get("url")
+            if not ft_url:
+                logger.info("[Library] No Full Text link in matched article for: %s", title[:60])
+                # Log all links found in this article for debugging
+                for lnk in (match.get("allLinks") or [])[:6]:
+                    logger.debug("[Library]   link: %s  %s", lnk.get("href","")[:60], lnk.get("text",""))
+                return None
+
+            # ── Step 4: Follow Full Text link ─────────────────────────────────
+            logger.info("[Library] Navigating to Full Text: %s", ft_url[:80])
+            resp = await page.goto(ft_url, timeout=25000)
+            await page.wait_for_load_state("networkidle", timeout=15000)
+            logger.info("[Library] Final URL after redirect: %s", page.url)
+
+            ct = (resp.headers.get("content-type", "") if resp else "") or ""
+            if "pdf" in ct or page.url.lower().endswith(".pdf"):
+                raw = await resp.body()
+                text = _extract_text_from_pdf_bytes(raw)
+                if text:
+                    logger.info("[Library] PDF extracted %d chars", len(text))
+                    return text[:12000]
+
+            # Extract main text from publisher page
+            text = await page.evaluate("""() => {
+                ['script','style','nav','header','footer','aside',
+                 '.cookie-banner','.ad','.sidebar'].forEach(sel =>
+                    document.querySelectorAll(sel).forEach(el => el.remove())
+                );
+                const candidates = [
+                    'article', 'main', '.article-body', '.article-content',
+                    '#article', '#articleBody', '.fulltext', '.body',
+                    '#abstract', '.abstract', '.paper-body',
+                ];
+                for (const sel of candidates) {
+                    const el = document.querySelector(sel);
+                    if (el && el.innerText.trim().length > 400)
+                        return el.innerText.replace(/\\s+/g, ' ').trim();
+                }
+                const body = document.body?.innerText || '';
+                return body.replace(/\\s+/g, ' ').trim();
             }""")
 
-            if not links:
-                logger.info("[Library] No deduplicated links for: %s", title[:60])
-                return None
+            if text and len(text) > 300:
+                logger.info("[Library] HTML extracted %d chars from publisher page", len(text))
+                return text[:12000]
 
-            # Open Access first
-            links.sort(key=lambda x: (0 if x.get("isOA") else 1))
-            logger.info("[Library] Found %d full-text links for '%s'", len(links), title[:50])
-
-            # ── Step 4: Follow each link ──────────────────────────────────────
-            for lnk in links[:5]:
-                logger.info("[Library] Trying '%s': %s", lnk["label"], lnk["url"][:80])
-                try:
-                    resp = await page.goto(lnk["url"], timeout=25000)
-                    await page.wait_for_load_state("networkidle", timeout=12000)
-
-                    ct = (resp.headers.get("content-type", "") if resp else "") or ""
-                    if "pdf" in ct or lnk["url"].lower().endswith(".pdf"):
-                        raw = await resp.body()
-                        text = _extract_text_from_pdf_bytes(raw)
-                        if text:
-                            logger.info("[Library] PDF extracted %d chars via '%s'", len(text), lnk["label"])
-                            return text[:12000]
-
-                    # Extract main text from HTML page
-                    text = await page.evaluate("""() => {
-                        ['script','style','nav','header','footer','aside'].forEach(t =>
-                            document.querySelectorAll(t).forEach(el => el.remove())
-                        );
-                        const sel = [
-                            'article', 'main', '.article-body', '.article-content',
-                            '#abstract', '.abstract', '#articleBody', '.content'
-                        ];
-                        for (const s of sel) {
-                            const el = document.querySelector(s);
-                            if (el && el.innerText.trim().length > 300)
-                                return el.innerText.replace(/\\s+/g, ' ').trim();
-                        }
-                        return (document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
-                    }""")
-
-                    if text and len(text) > 300:
-                        logger.info("[Library] HTML extracted %d chars via '%s'", len(text), lnk["label"])
-                        return text[:12000]
-
-                except Exception as e:
-                    logger.debug("[Library] Link failed (%s): %s", lnk["url"][:60], e)
-                    continue
-
-            logger.info("[Library] All links exhausted for: %s", title[:60])
+            logger.info("[Library] Could not extract text from publisher page: %s", page.url)
             return None
 
         except Exception as e:
-            logger.warning("[Library] Playwright error: %s", e)
+            logger.warning("[Library] Error: %s", e)
             return None
         finally:
             await browser.close()
@@ -219,23 +244,21 @@ def _run_in_new_loop(title: str, username: str, password: str) -> Optional[str]:
 
 
 def fetch_from_library(title: str) -> Optional[str]:
-    """Synchronous wrapper — search Gachon Library and return full text or None."""
     cfg  = _load_config()
     lib  = cfg.get("library", {})
     user = lib.get("username", "")
     pwd  = lib.get("password", "")
 
     if not user or not pwd:
-        logger.debug("[Library] No credentials configured — skipping library fetch")
+        logger.debug("[Library] No credentials — skipping")
         return None
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_run_in_new_loop, title, user, pwd)
-            return future.result(timeout=90)
+            return executor.submit(_run_in_new_loop, title, user, pwd).result(timeout=90)
     except concurrent.futures.TimeoutError:
-        logger.warning("[Library] fetch timed out for: %s", title[:60])
+        logger.warning("[Library] Timed out for: %s", title[:60])
         return None
     except Exception as e:
-        logger.warning("[Library] fetch_from_library error: %s", e)
+        logger.warning("[Library] Error: %s", e)
         return None
