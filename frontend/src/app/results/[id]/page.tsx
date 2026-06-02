@@ -473,7 +473,7 @@ export default function ResultsPage() {
               <EligibilityPaperList papers={papers} query={query} />
             )}
 
-            {activeTab === 'report' && report && <ReviewReport content={report} />}
+            {activeTab === 'report' && report && <ReviewReport content={report} query={query} />}
             {done && !report && activeTab === 'report' && (
               <div className="text-center py-12 space-y-3">
                 <p className="text-gray-400 text-sm">보고서를 불러오는 중...</p>
