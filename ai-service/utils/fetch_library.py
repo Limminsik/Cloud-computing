@@ -223,22 +223,31 @@ async def _playwright_fetch(title: str, username: str, password: str) -> Optiona
 
             logger.info("[Library] Opening Full Text in new tab: %s", ft_url[:80])
             new_page = await ctx.new_page()
+            page_title = ""
+            final_url = ft_url
             try:
                 await new_page.goto(ft_url, timeout=25000)
                 await new_page.wait_for_load_state("networkidle", timeout=15000)
 
-                # Re-login if the page shows a login form (EDS double-auth flow)
+                # Re-login if the page shows the library login form (EDS double-auth)
                 relogged = await _login_on_page(new_page, username, password)
                 if relogged:
                     await new_page.wait_for_load_state("networkidle", timeout=15000)
 
-                final_url = new_page.url
-                logger.info("[Library] Final URL: %s", final_url)
+                final_url  = new_page.url
+                page_title = await new_page.title()
+                logger.info("[Library] Final URL: %s (title: %s)", final_url[:80], page_title[:40])
 
-                # Hard fail only if still stuck on login path
+                # Skip if redirected to EBSCO OAuth (can't auto-handle)
+                if "login.ebsco.com" in final_url:
+                    logger.info("[Library] EBSCO OAuth required — cannot auto-login, skipping")
+                    await new_page.close()
+                    return None
+
+                # Hard fail only if stuck on library login path
                 final_path = urlparse(final_url).path.lower()
                 if any(kw in final_path for kw in ["/login", "/logon", "/signin", "/account/logon"]):
-                    logger.warning("[Library] Still on login page after re-login: %s", final_url[:60])
+                    logger.warning("[Library] Still on login page: %s", final_url[:60])
                     await new_page.close()
                     return None
 
