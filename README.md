@@ -10,6 +10,8 @@
 [![Claude](https://img.shields.io/badge/Claude-Sonnet%204.6-blueviolet)](https://www.anthropic.com/)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5%20Flash-4285F4)](https://deepmind.google/technologies/gemini/)
 
+![메인 화면](docs/screenshots/main.png)
+
 </div>
 
 ---
