@@ -55,17 +55,22 @@ async def writer_agent(
     generated  = state.get("generated_search_terms") or {}
     keywords   = generated.get("keywords") or state.get("keywords") or []
 
-    prompt = WRITER_PROMPT.format(
-        query=state.get("research_question") or state.get("query", ""),
-        keywords=", ".join(keywords) if keywords else "없음",
-        inclusion_criteria="\n".join(f"  - {c}" for c in inclusion) if inclusion else "  별도 기준 없음",
-        exclusion_criteria="\n".join(f"  - {c}" for c in exclusion) if exclusion else "  별도 기준 없음",
-        identified=stats.get("identified", 0),
-        screened=stats.get("screened", 0),
-        eligible=stats.get("eligible", 0),
-        included=stats.get("included", len(papers)),
-        papers_data=papers_json,
-    )
+    # Use str.replace instead of .format() to avoid KeyError when
+    # criteria / keywords contain literal { } characters
+    prompt = WRITER_PROMPT
+    replacements = {
+        "{query}":              state.get("research_question") or state.get("query", ""),
+        "{keywords}":           ", ".join(keywords) if keywords else "없음",
+        "{inclusion_criteria}": "\n".join(f"  - {c}" for c in inclusion) if inclusion else "  별도 기준 없음",
+        "{exclusion_criteria}": "\n".join(f"  - {c}" for c in exclusion) if exclusion else "  별도 기준 없음",
+        "{identified}":         str(stats.get("identified", 0)),
+        "{screened}":           str(stats.get("screened", 0)),
+        "{eligible}":           str(stats.get("eligible", 0)),
+        "{included}":           str(stats.get("included", len(papers))),
+        "{papers_data}":        papers_json,
+    }
+    for key, val in replacements.items():
+        prompt = prompt.replace(key, val)
 
     await emit({
         "type": "agent_progress",

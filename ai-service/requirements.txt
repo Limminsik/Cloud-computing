@@ -14,5 +14,6 @@ serpapi>=0.1.5
 PyYAML>=6.0.0
 pypdf>=4.0.0
 python-multipart>=0.0.9
+playwright>=1.44.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0

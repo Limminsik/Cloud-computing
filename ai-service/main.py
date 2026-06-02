@@ -78,16 +78,24 @@ class PipelineResponse(BaseModel):
 
 async def _notify_nestjs(session_id: str, final_state: ReviewState):
     url = f"{NESTJS_CALLBACK_URL}/api/sessions/{session_id}/complete"
+    report = final_state.get("review_report") or ""
     payload = {
         "prisma_stats":    final_state.get("prisma_stats", {}),
         "included_papers": final_state.get("included_papers", []),
-        "review_report":   final_state.get("review_report", ""),
+        "review_report":   report,
     }
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            await client.post(url, json=payload)
-    except Exception:
-        pass
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                logger.info(f"[{session_id}] NestJS notified — report {len(report)} chars")
+                return
+        except Exception as e:
+            logger.error(f"[{session_id}] NestJS notify attempt {attempt+1} failed: {e}")
+            if attempt < 2:
+                await asyncio.sleep(2)
+    logger.error(f"[{session_id}] NestJS notify failed after 3 attempts")
 
 
 async def _save_stage_to_db(session_id: str, stage: str, papers: list, prisma_stats: dict):

@@ -453,7 +453,15 @@ export default function ResultsPage() {
 
             {activeTab === 'report' && report && <ReviewReport content={report} />}
             {done && !report && activeTab === 'report' && (
-              <div className="text-center py-12 text-gray-400 text-sm">보고서를 불러오는 중...</div>
+              <div className="text-center py-12 space-y-3">
+                <p className="text-gray-400 text-sm">보고서를 불러오는 중...</p>
+                <button
+                  onClick={fetchReport}
+                  className="text-xs text-blue-500 border border-blue-200 rounded-full px-3 py-1 hover:bg-blue-50"
+                >
+                  새로고침
+                </button>
+              </div>
             )}
           </div>
         </main>
