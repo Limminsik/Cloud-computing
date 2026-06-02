@@ -70,19 +70,21 @@ Extract structured information from the content to support report writing.
 Classify as one of: Original Article | Review | Systematic Review | Meta-analysis | Case Report | Editorial | Letter | Conference Paper | Other
 
 ## Output (JSON only — no markdown, no code fences)
+** IMPORTANT: Write all text fields (reason, pico, key_findings, limitations) in Korean. **
+
 {{
   "decision": "INCLUDE" or "EXCLUDE",
   "exclude_reason_category": "study_design" | "population" | "outcome" | "language" | "duplicate" | "other" | null,
-  "reason": "<2–3 sentences citing specific evidence from the content>",
+  "reason": "<구체적 근거를 제시하는 2~3문장, 한국어로 작성>",
   "article_type": "<Original Article | Review | Systematic Review | Meta-analysis | Case Report | Editorial | Letter | Conference Paper | Other>",
   "pico": {{
-    "population": "<study population, sample size if available, or null>",
-    "intervention": "<intervention or exposure, or null>",
-    "comparison": "<comparison/control group, or null>",
-    "outcome": "<primary outcomes measured, or null>"
+    "population": "<연구 대상 집단 및 표본 크기(있는 경우), 한국어로 작성, 없으면 null>",
+    "intervention": "<중재 또는 노출 요인, 한국어로 작성, 없으면 null>",
+    "comparison": "<비교군 또는 대조군, 한국어로 작성, 없으면 null>",
+    "outcome": "<주요 결과 지표, 한국어로 작성, 없으면 null>"
   }},
-  "key_findings": "<1–2 sentences summarising the main results, or null if excluded>",
-  "limitations": "<key limitations mentioned, or null>"
+  "key_findings": "<주요 연구 결과 1~2문장 요약, 한국어로 작성, 제외 논문은 null>",
+  "limitations": "<주요 한계점, 한국어로 작성, 없으면 null>"
 }}
 """
 

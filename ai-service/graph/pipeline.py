@@ -16,7 +16,6 @@ from state import ReviewState
 from agents.search_agent import search_agent
 from agents.screening_agent import screening_agent
 from agents.eligibility_agent import eligibility_agent
-from agents.extraction_agent import extraction_agent
 from agents.writer_agent import writer_agent
 
 # ── Emit registry ─────────────────────────────────────────────────────────────
@@ -59,11 +58,6 @@ async def eligibility_node(state: ReviewState) -> dict:
     return await eligibility_agent(state, emit)
 
 
-async def extraction_node(state: ReviewState) -> dict:
-    emit = _get_emit(state["session_id"])
-    return await extraction_agent(state, emit)
-
-
 async def writer_node(state: ReviewState) -> dict:
     emit = _get_emit(state["session_id"])
     return await writer_agent(state, emit)
@@ -82,21 +76,19 @@ def build_graph():
     g.add_node("search",      search_node)
     g.add_node("screening",   screening_node)
     g.add_node("eligibility", eligibility_node)
-    g.add_node("extraction",  extraction_node)
     g.add_node("writer",      writer_node)
 
     g.set_entry_point("search")
     g.add_edge("search",      "screening")
     g.add_edge("screening",   "eligibility")
-    g.add_edge("eligibility", "extraction")
-    g.add_edge("extraction",  "writer")
+    g.add_edge("eligibility", "writer")
     g.add_edge("writer",      END)
 
     checkpointer = MemorySaver()
 
     return g.compile(
         checkpointer=checkpointer,
-        interrupt_before=["screening", "eligibility", "extraction"],
+        interrupt_before=["screening", "eligibility"],
     )
 
 

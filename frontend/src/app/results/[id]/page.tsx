@@ -290,9 +290,10 @@ export default function ResultsPage() {
     } catch { /* Non-fatal */ }
   };
 
-  const handleRunStage = async (stage: PrismaStage, criteria: string[]) => {
-    setActiveStage(stage);
-    setActiveTab(stage === 'eligibility' ? 'eligibility' : 'papers');
+  const handleRunStage = async (stage: PrismaStage | 'writer', criteria: string[]) => {
+    setActiveStage(stage as PrismaStage);
+    if (stage === 'eligibility') setActiveTab('eligibility');
+    else if (stage === 'writer') setActiveTab('report');
     try {
       await fetch(`${NESTJS_URL}/api/sessions/${sessionId}/run-stage`, {
         method: 'POST',
@@ -479,10 +480,23 @@ export default function ResultsPage() {
             )}
 
             {activeTab === 'eligibility' && (
-              <EligibilityPaperList
-                papers={papers}
-                query={query}
-              />
+              <div className="space-y-4">
+                <EligibilityPaperList papers={papers} query={query} />
+                {papers.some(p => p.stage === 'eligibility' && p.decision === 'INCLUDE') && !done && (
+                  <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
+                    <p className="text-[11px] text-gray-400">
+                      포함 논문 {papers.filter(p => p.stage === 'eligibility' && p.decision === 'INCLUDE').length}건을 바탕으로 PRISMA 보고서를 작성합니다.
+                    </p>
+                    <button
+                      onClick={() => handleRunStage('writer' as any, [])}
+                      disabled={activeStage !== null}
+                      className="text-sm font-semibold px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                    >
+                      {activeStage !== null ? '작성 중...' : '보고서 작성 시작 →'}
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
 
             {activeTab === 'report' && report && <ReviewReport content={report} />}

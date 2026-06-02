@@ -31,20 +31,35 @@ async def writer_agent(
     papers_summary = []
     for p in papers:
         entry = {
-            "title": p["title"],
+            "title":   p["title"],
             "authors": p.get("authors", []),
-            "year": p.get("year"),
-            "venue": p.get("venue", ""),
+            "year":    p.get("year"),
+            "venue":   p.get("venue", ""),
             "abstract": p.get("abstract", ""),
+            "reason":  p.get("reason", ""),
         }
-        if p.get("extracted_data"):
-            entry.update(p["extracted_data"])
+        ed = p.get("extracted_data") or {}
+        entry.update({
+            "article_type":        ed.get("article_type"),
+            "pico":                ed.get("pico"),
+            "key_findings":        ed.get("key_findings"),
+            "limitations":         ed.get("limitations"),
+            "full_text_available": ed.get("full_text_available", False),
+        })
         papers_summary.append(entry)
 
     papers_json = json.dumps(papers_summary, ensure_ascii=False, indent=2)
 
+    inclusion  = state.get("inclusion_criteria") or []
+    exclusion  = state.get("exclusion_criteria") or []
+    generated  = state.get("generated_search_terms") or {}
+    keywords   = generated.get("keywords") or state.get("keywords") or []
+
     prompt = WRITER_PROMPT.format(
         query=state.get("research_question") or state.get("query", ""),
+        keywords=", ".join(keywords) if keywords else "없음",
+        inclusion_criteria="\n".join(f"  - {c}" for c in inclusion) if inclusion else "  별도 기준 없음",
+        exclusion_criteria="\n".join(f"  - {c}" for c in exclusion) if exclusion else "  별도 기준 없음",
         identified=stats.get("identified", 0),
         screened=stats.get("screened", 0),
         eligible=stats.get("eligible", 0),
