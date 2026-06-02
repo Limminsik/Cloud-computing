@@ -62,9 +62,9 @@ Extract structured information from the content to support report writing.
 - EXCLUDE if design is inappropriate, population is out of scope, or outcomes are irrelevant.
 
 **If ABSTRACT ONLY is available:**
-- Assess conservatively — no benefit of the doubt.
-- INCLUDE only if relevance AND study design are explicitly demonstrated.
-- EXCLUDE if vague, insufficient, or clearly out of scope.
+- If the paper is clearly relevant to the research question based on topic and content, lean toward INCLUDE.
+- EXCLUDE only when clearly out of scope, wrong language, duplicate, or the abstract explicitly describes an inappropriate study type.
+- Do NOT exclude solely because the abstract is short or lacks methodological detail — insufficient information alone is not a reason to exclude.
 
 ### Article type classification:
 Classify as one of: Original Article | Review | Systematic Review | Meta-analysis | Case Report | Editorial | Letter | Conference Paper | Other

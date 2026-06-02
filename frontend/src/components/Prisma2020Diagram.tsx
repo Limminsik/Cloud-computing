@@ -17,7 +17,8 @@ interface Props {
   stats: PrismaStats;
   completedStages: Set<PrismaStage>;
   activeStage: PrismaStage | null;
-  onRunStage: (stage: PrismaStage, criteria: string[]) => void;
+  done?: boolean;
+  onRunStage: (stage: PrismaStage | 'writer', criteria: string[]) => void;
   onSelectStage?: (tab: 'identified' | 'papers' | 'report', stageFilter?: string) => void;
 }
 
@@ -44,8 +45,8 @@ function Row({
   );
 }
 
-export default function Prisma2020Diagram({ stats, completedStages, activeStage, onRunStage, onSelectStage }: Props) {
-  const [inputs, setInputs] = useState({ screening: '', eligibility: '', inclusion: '' });
+export default function Prisma2020Diagram({ stats, completedStages, activeStage, done, onRunStage, onSelectStage }: Props) {
+  const [inputs, setInputs] = useState({ screening: '', eligibility: '', writer: '' });
 
   const id  = completedStages.has('identification');
   const sc  = completedStages.has('screening');
@@ -58,14 +59,14 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
   const excElig   = el  ? Math.max(0, stats.screened - stats.eligible) : null;
   const excInc    = inc ? Math.max(0, stats.eligible - stats.included) : null;
 
-  const canRun = (stage: PrismaStage) => {
+  const canRun = (stage: PrismaStage | 'writer') => {
     if (stage === 'screening')   return id  && !sc  && activeStage !== 'screening';
     if (stage === 'eligibility') return sc  && !el  && activeStage !== 'eligibility';
-    if (stage === 'inclusion')   return el  && !inc && activeStage !== 'inclusion';
+    if (stage === 'writer')      return el  && !done && activeStage !== 'inclusion';
     return false;
   };
 
-  const handleRun = (stage: 'screening' | 'eligibility' | 'inclusion') => {
+  const handleRun = (stage: 'screening' | 'eligibility' | 'writer') => {
     const criteria = inputs[stage].split('\n').map(s => s.trim()).filter(Boolean);
     onRunStage(stage, criteria);
   };
@@ -165,20 +166,22 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
         )}
       </div>
 
-      {canRun('inclusion') && (
+      {canRun('writer') && (
         <div className="mt-1.5 space-y-1">
-          <textarea rows={2} value={inputs.inclusion}
-            onChange={e => setInputs(p => ({ ...p, inclusion: e.target.value }))}
-            placeholder="리포트 관점/강조 사항 (선택)"
-            className="w-full text-[10px] border border-gray-200 rounded px-2 py-1 resize-none focus:outline-none focus:ring-1 focus:ring-gray-300 bg-white placeholder-gray-300" />
-          <button onClick={() => handleRun('inclusion')}
-            className="w-full text-[10px] font-medium py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
-            리포트 생성
+          <button onClick={() => handleRun('writer')}
+            className="w-full text-[10px] font-semibold py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+            보고서 작성 시작 →
           </button>
         </div>
       )}
+      {done && (
+        <button onClick={() => onSelectStage?.('report')}
+          className="mt-1.5 w-full text-[10px] font-medium py-1 rounded border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition-colors">
+          리포트 보기
+        </button>
+      )}
       {activeStage === 'inclusion' && (
-        <p className="text-[9px] text-blue-400 animate-pulse text-center mt-1">진행 중...</p>
+        <p className="text-[9px] text-blue-400 animate-pulse text-center mt-1">보고서 작성 중...</p>
       )}
     </div>
   );
