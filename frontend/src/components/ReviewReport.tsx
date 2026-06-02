@@ -22,7 +22,7 @@ function stripLeadingTitle(content: string): string {
   });
 }
 
-export default function ReviewReport({ content, query, keywords = [], booleanQuery, generatedTerms }: Props) {
+export default function ReviewReport({ content, query, keywords = [], generatedTerms }: Props) {
   const reportRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -44,42 +44,57 @@ export default function ReviewReport({ content, query, keywords = [], booleanQue
   const safeQuery = (query || 'Report').replace(/[^a-zA-Z0-9가-힣 ]/g, '').trim().slice(0, 50);
   const pdfFilename = `${safeQuery}_${dateCode}`;
 
-  const handleExportPdf = async () => {
+  const handleExportPdf = () => {
     if (!reportRef.current || exporting) return;
     setExporting(true);
-    try {
-      const { default: jsPDF } = await import('jspdf');
-      const { default: html2canvas } = await import('html2canvas');
 
-      const el = reportRef.current;
-      const canvas = await html2canvas(el, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        windowWidth: el.scrollWidth,
-        windowHeight: el.scrollHeight,
-      });
+    const printWin = window.open('', '_blank', 'width=900,height=1200');
+    if (!printWin) { setExporting(false); return; }
 
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
-      const imgW = pageW;
-      const imgH = (canvas.height * imgW) / canvas.width;
+    // Collect all stylesheets from the current page
+    const styles = Array.from(document.styleSheets)
+      .map(sheet => {
+        try {
+          return Array.from(sheet.cssRules).map(r => r.cssText).join('\n');
+        } catch { return ''; }
+      })
+      .join('\n');
 
-      let y = 0;
-      while (y < imgH) {
-        if (y > 0) pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, -y, imgW, imgH);
-        y += pageH;
-      }
+    const html = reportRef.current.outerHTML;
 
-      pdf.save(`${pdfFilename}.pdf`);
-    } catch (e) {
-      console.error('PDF export failed:', e);
-    } finally {
+    printWin.document.write(`<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <title>${pdfFilename}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    ${styles}
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body { font-family: 'Noto Sans KR', sans-serif; background: #fff; margin: 0; padding: 20px; }
+    @page { size: A4; margin: 15mm; }
+    @media print { body { padding: 0; } }
+  </style>
+</head>
+<body>${html}</body>
+</html>`);
+    printWin.document.close();
+
+    // Wait for fonts to load then print
+    printWin.onload = () => {
+      setTimeout(() => {
+        printWin.focus();
+        printWin.print();
+        printWin.close();
+        setExporting(false);
+      }, 800);
+    };
+    // Fallback if onload doesn't fire
+    setTimeout(() => {
+      try { printWin.focus(); printWin.print(); printWin.close(); } catch {}
       setExporting(false);
-    }
+    }, 2500);
   };
 
   return (
@@ -132,25 +147,6 @@ export default function ReviewReport({ content, query, keywords = [], booleanQue
                     </span>
                   ))}
                 </div>
-              </div>
-            )}
-            {(meshTerms.length > 0 || booleanQuery) && (
-              <div className="sm:col-span-2">
-                <p className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">검색 전략 키워드</p>
-                {meshTerms.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-1.5">
-                    {meshTerms.map((t, i) => (
-                      <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-800">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {booleanQuery && (
-                  <p className="text-[9px] text-slate-500 font-mono leading-relaxed break-all">
-                    {booleanQuery.length > 120 ? booleanQuery.slice(0, 120) + '…' : booleanQuery}
-                  </p>
-                )}
               </div>
             )}
           </div>

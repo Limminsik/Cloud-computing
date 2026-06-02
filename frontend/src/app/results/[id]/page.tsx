@@ -377,16 +377,6 @@ export default function ResultsPage() {
           >
             Log
           </button>
-          {/* 현재 탭 표시 (읽기 전용 — 좌측 PRISMA 다이어그램으로 이동) */}
-          <div className="text-[10px] text-gray-400 border border-gray-200 rounded-full px-3 py-1">
-            {{
-              identified: `식별 (${identifiedPapers.length})`,
-              papers:     `심사 (${papers.filter(p => p.stage === 'screening').length})`,
-              fulltext:   '전문 확보',
-              eligibility:`적격성 (${papers.filter(p => p.stage === 'eligibility').length})`,
-              report:     '리포트',
-            }[activeTab]}
-          </div>
         </div>
       </div>
 
