@@ -24,6 +24,7 @@ model ResearchSession {
   papers            Paper[]
   report            Report?
   prismaStats       Json?
+  fulltextUploads   Json?   // [{ title, chars, preview }]
 }
 
 model Paper {

@@ -438,11 +438,18 @@ async def run_eligibility(body: StageRequest):
 
 @app.post("/pipeline/inclusion", response_model=PipelineResponse)
 async def run_inclusion(body: StageRequest):
-    """Resume graph — runs Extraction + Writer Agents to completion."""
+    """Resume graph — runs Writer Agent to completion (legacy alias for /writer)."""
     session_id = body.session_id
-    updated = {"inclusion_criteria": body.criteria} if body.criteria else {}
-    asyncio.create_task(_run_graph(session_id, updated_fields=updated or None))
+    asyncio.create_task(_run_graph(session_id, updated_fields=None))
     return PipelineResponse(session_id=session_id, status="inclusion")
+
+
+@app.post("/pipeline/writer", response_model=PipelineResponse)
+async def run_writer(body: StageRequest):
+    """Resume graph from eligibility — runs Writer Agent to completion."""
+    session_id = body.session_id
+    asyncio.create_task(_run_graph(session_id, updated_fields=None))
+    return PipelineResponse(session_id=session_id, status="writer")
 
 
 @app.get("/stream/{session_id}")

@@ -3,8 +3,9 @@
 import { useRef, useState, useEffect } from 'react';
 import { PaperDecision } from './PaperList';
 
-const AI_SERVICE_URL = process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:8000';
-const LIBRARY_SEARCH = 'https://lib.gachon.ac.kr/searchTotal/result?st=KWRD&si=TOTAL&oi=DISP07&os=ASC&q=';
+const AI_SERVICE_URL  = process.env.NEXT_PUBLIC_AI_SERVICE_URL  || 'http://localhost:8000';
+const NESTJS_URL      = process.env.NEXT_PUBLIC_NESTJS_URL       || 'http://localhost:4000';
+const LIBRARY_SEARCH  = 'https://lib.gachon.ac.kr/searchTotal/result?st=KWRD&si=TOTAL&oi=DISP07&os=ASC&q=';
 
 interface UploadState {
   status: 'idle' | 'uploading' | 'done' | 'error';
@@ -24,18 +25,19 @@ export default function FulltextPanel({ sessionId, papers, onReady }: Props) {
   const [uploads, setUploads] = useState<Record<string, UploadState>>({});
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  // Restore upload status on mount (e.g. after page refresh)
+  // Restore upload status on mount — prefer NestJS DB (persistent), fallback to ai-service files
   useEffect(() => {
-    fetch(`${AI_SERVICE_URL}/sessions/${sessionId}/fulltext-status`)
+    fetch(`${NESTJS_URL}/api/sessions/${sessionId}`)
       .then(r => r.json())
       .then(data => {
-        const restored: Record<string, UploadState> = {};
-        for (const item of data.papers ?? []) {
-          if (item.title) {
-            restored[item.title] = { status: 'done', chars: item.chars, preview: item.preview };
+        const uploads: any[] = data.fulltextUploads ?? [];
+        if (uploads.length > 0) {
+          const restored: Record<string, UploadState> = {};
+          for (const item of uploads) {
+            if (item.title) restored[item.title] = { status: 'done', chars: item.chars, preview: item.preview };
           }
+          setUploads(restored);
         }
-        if (Object.keys(restored).length > 0) setUploads(restored);
       })
       .catch(() => {});
   }, [sessionId]);
@@ -62,6 +64,12 @@ export default function FulltextPanel({ sessionId, papers, onReady }: Props) {
       }
       const data = await res.json();
       setUpload(title, { status: 'done', chars: data.chars, preview: data.preview });
+      // Persist upload record to DB
+      fetch(`${NESTJS_URL}/api/sessions/${sessionId}/fulltext-upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, chars: data.chars, preview: data.preview }),
+      }).catch(() => {});
     } catch (e: any) {
       setUpload(title, { status: 'error', error: e.message });
     }
@@ -71,6 +79,12 @@ export default function FulltextPanel({ sessionId, papers, onReady }: Props) {
     await fetch(`${AI_SERVICE_URL}/sessions/${sessionId}/fulltext?title=${encodeURIComponent(title)}`, {
       method: 'DELETE',
     });
+    // Remove from NestJS DB
+    fetch(`${NESTJS_URL}/api/sessions/${sessionId}/fulltext-upload/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }).catch(() => {});
     setUpload(title, { status: 'idle' });
     if (fileRefs.current[title]) fileRefs.current[title]!.value = '';
   };

@@ -236,6 +236,15 @@ def fetch_fulltext_with_source(url_or_paper: str | dict | None) -> tuple[str | N
     if pubmed_url and pubmed_url != primary_url:
         attempts.append(("PubMed 초록", lambda u=pubmed_url: _fetch_html(u, selectors=["#abstract", ".abstract-content"])))
 
+    # Gachon Library — last resort (rate-limited, needs credentials for some content)
+    title = paper.get("title", "")
+    if title:
+        try:
+            from utils.fetch_library import fetch_from_library
+            attempts.append(("가천도서관", lambda t=title: fetch_from_library(t)))
+        except ImportError:
+            pass
+
     title_hint = (paper.get("title") or "")[:60]
     if not attempts:
         logger.info(f"[fetch_fulltext] No URL fields available — '{title_hint}'")

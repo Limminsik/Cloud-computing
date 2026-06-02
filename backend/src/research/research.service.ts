@@ -193,13 +193,38 @@ export class ResearchService {
     await this.prisma.researchSession.delete({ where: { id } });
   }
 
-  async runStage(id: string, stage: 'screening' | 'eligibility' | 'inclusion', criteria: string[]) {
+  async saveFulltextUpload(id: string, upload: { title: string; chars: number; preview: string }) {
+    const session = await this.prisma.researchSession.findUnique({ where: { id } });
+    if (!session) throw new NotFoundException(`Session ${id} not found`);
+    const existing = (session.fulltextUploads as any[] | null) ?? [];
+    const filtered = existing.filter((u: any) => u.title !== upload.title);
+    await this.prisma.researchSession.update({
+      where: { id },
+      data: { fulltextUploads: [...filtered, upload] },
+    });
+    return { saved: true };
+  }
+
+  async deleteFulltextUpload(id: string, title: string) {
+    const session = await this.prisma.researchSession.findUnique({ where: { id } });
+    if (!session) throw new NotFoundException(`Session ${id} not found`);
+    const existing = (session.fulltextUploads as any[] | null) ?? [];
+    await this.prisma.researchSession.update({
+      where: { id },
+      data: { fulltextUploads: existing.filter((u: any) => u.title !== title) },
+    });
+    return { deleted: true };
+  }
+
+  async runStage(id: string, stage: 'screening' | 'eligibility' | 'inclusion' | 'writer', criteria: string[]) {
     const session = await this.prisma.researchSession.findUnique({ where: { id } });
     if (!session) throw new NotFoundException(`Session ${id} not found`);
 
     const aiServiceUrl = this.config.get<string>('AI_SERVICE_URL', 'http://localhost:8000');
+    // 'writer' maps to /pipeline/writer on ai-service
+    const endpoint = stage === 'writer' ? 'writer' : stage;
     await firstValueFrom(
-      this.httpService.post(`${aiServiceUrl}/pipeline/${stage}`, {
+      this.httpService.post(`${aiServiceUrl}/pipeline/${endpoint}`, {
         session_id: id,
         criteria,
       }),

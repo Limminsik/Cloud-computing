@@ -19,7 +19,7 @@ interface Props {
   activeStage: PrismaStage | null;
   done?: boolean;
   onRunStage: (stage: PrismaStage | 'writer', criteria: string[]) => void;
-  onSelectStage?: (tab: 'identified' | 'papers' | 'report', stageFilter?: string) => void;
+  onSelectStage?: (tab: 'identified' | 'papers' | 'fulltext' | 'eligibility' | 'report') => void;
 }
 
 function VLine({ active }: { active?: boolean }) {
@@ -71,9 +71,9 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
     onRunStage(stage, criteria);
   };
 
-  const clickable = (tab: 'identified' | 'papers' | 'report', enabled: boolean) =>
+  const clickable = (tab: 'identified' | 'papers' | 'fulltext' | 'eligibility' | 'report', enabled: boolean) =>
     enabled && onSelectStage
-      ? { onClick: () => onSelectStage(tab), className: 'cursor-pointer' }
+      ? { onClick: () => onSelectStage(tab), className: 'cursor-pointer hover:border-blue-200 hover:bg-blue-50/30 transition-colors' }
       : {};
 
   return (
@@ -124,10 +124,28 @@ export default function Prisma2020Diagram({ stats, completedStages, activeStage,
 
       <VLine active={sc} />
 
+      {/* ── Full-text 확보 ── */}
+      {sc && (
+        <>
+          <p className="text-[9px] text-gray-400 uppercase tracking-wider mb-1">Full-text</p>
+          <div
+            {...clickable('fulltext', sc)}
+            className={`border rounded-md px-2.5 py-2 transition-colors ${
+              'border-gray-100'
+            } ${sc && onSelectStage ? 'cursor-pointer hover:border-blue-200 hover:bg-blue-50/30' : ''}`}
+          >
+            <div className="flex items-baseline justify-between gap-2 py-0.5">
+              <span className="text-[10px] text-gray-400">전문 확보 (PDF 업로드)</span>
+            </div>
+          </div>
+          <VLine active={sc} />
+        </>
+      )}
+
       {/* ── Eligibility ── */}
       <p className="text-[9px] text-gray-400 uppercase tracking-wider mb-1">Eligibility</p>
       <div
-        {...(el && onSelectStage ? { onClick: () => onSelectStage('eligibility' as any) } : {})}
+        {...clickable('eligibility', el)}
         className={`border rounded-md px-2.5 py-2 space-y-0.5 transition-colors ${
           activeStage === 'eligibility' ? 'border-blue-200' : 'border-gray-100'
         } ${el && onSelectStage ? 'cursor-pointer hover:border-blue-200 hover:bg-blue-50/30' : ''}`}

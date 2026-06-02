@@ -355,48 +355,15 @@ export default function ResultsPage() {
           >
             Log
           </button>
-          {/* 탭 전환 */}
-          <div className="flex border border-gray-200 rounded-full overflow-hidden text-[10px]">
-            {identifiedPapers.length > 0 && (
-              <button
-                onClick={() => setActiveTab('identified')}
-                className={`px-2.5 py-1 transition-colors ${activeTab === 'identified' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-              >
-                식별 ({identifiedPapers.length})
-              </button>
-            )}
-            {(papers.filter(p => p.stage === 'screening').length > 0 || completedStages.has('identification')) && (
-              <button
-                onClick={() => setActiveTab('papers')}
-                className={`px-2.5 py-1 transition-colors ${activeTab === 'papers' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-              >
-                심사 {papers.filter(p => p.stage === 'screening').length > 0 ? `(${papers.filter(p => p.stage === 'screening').length})` : ''}
-              </button>
-            )}
-            {completedStages.has('screening') && (
-              <button
-                onClick={() => setActiveTab('fulltext')}
-                className={`px-2.5 py-1 transition-colors ${activeTab === 'fulltext' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-              >
-                전문 확보
-              </button>
-            )}
-            {(papers.some(p => p.stage === 'eligibility') || completedStages.has('screening')) && (
-              <button
-                onClick={() => setActiveTab('eligibility')}
-                className={`px-2.5 py-1 transition-colors ${activeTab === 'eligibility' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-              >
-                적격성 {papers.filter(p => p.stage === 'eligibility').length > 0 ? `(${papers.filter(p => p.stage === 'eligibility').length})` : ''}
-              </button>
-            )}
-            {report && (
-              <button
-                onClick={() => setActiveTab('report')}
-                className={`px-2.5 py-1 transition-colors ${activeTab === 'report' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-              >
-                리포트
-              </button>
-            )}
+          {/* 현재 탭 표시 (읽기 전용 — 좌측 PRISMA 다이어그램으로 이동) */}
+          <div className="text-[10px] text-gray-400 border border-gray-200 rounded-full px-3 py-1">
+            {{
+              identified: `식별 (${identifiedPapers.length})`,
+              papers:     `심사 (${papers.filter(p => p.stage === 'screening').length})`,
+              fulltext:   '전문 확보',
+              eligibility:`적격성 (${papers.filter(p => p.stage === 'eligibility').length})`,
+              report:     '리포트',
+            }[activeTab]}
           </div>
         </div>
       </div>
@@ -417,7 +384,7 @@ export default function ResultsPage() {
             onRunStage={handleRunStage}
             activeStage={activeStage}
             done={done}
-            onSelectStage={(tab) => setActiveTab(tab as any)}
+            onSelectStage={(tab) => setActiveTab(tab)}
           />
         </aside>
 

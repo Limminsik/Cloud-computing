@@ -78,9 +78,29 @@ export class ResearchController {
   @HttpCode(HttpStatus.OK)
   async runStage(
     @Param('id') id: string,
-    @Body() body: { stage: 'screening' | 'eligibility' | 'inclusion'; criteria?: string[] },
+    @Body() body: { stage: 'screening' | 'eligibility' | 'inclusion' | 'writer'; criteria?: string[] },
   ) {
     return this.researchService.runStage(id, body.stage, body.criteria || []);
+  }
+
+  /** Save fulltext upload record to DB */
+  @Post('sessions/:id/fulltext-upload')
+  @HttpCode(HttpStatus.OK)
+  async saveFulltextUpload(
+    @Param('id') id: string,
+    @Body() body: { title: string; chars: number; preview: string },
+  ) {
+    return this.researchService.saveFulltextUpload(id, body);
+  }
+
+  /** Delete fulltext upload record from DB */
+  @Post('sessions/:id/fulltext-upload/delete')
+  @HttpCode(HttpStatus.OK)
+  async deleteFulltextUpload(
+    @Param('id') id: string,
+    @Body() body: { title: string },
+  ) {
+    return this.researchService.deleteFulltextUpload(id, body.title);
   }
 
   /** Called by FastAPI when pipeline finishes — saves results to DB */
