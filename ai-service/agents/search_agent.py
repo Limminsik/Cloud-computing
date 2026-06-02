@@ -84,6 +84,23 @@ async def _fetch_scholar_all(query: str) -> tuple[list[dict], int]:
     return all_items, total
 
 
+def _parse_venue_from_summary(summary: str) -> str:
+    """Extract journal/venue name from SerpAPI publication_info.summary.
+
+    Summary format: "Author1, Author2 - Journal Name, Year -"
+    We want just the journal name (second '-'-delimited segment).
+    """
+    if not summary:
+        return ""
+    parts = [p.strip() for p in summary.split(" - ")]
+    # parts[0] = authors, parts[1] = "Journal, Year", parts[2] = ""
+    if len(parts) >= 2:
+        # Strip trailing year/comma from venue segment
+        venue = re.sub(r",?\s*\d{4}\s*$", "", parts[1]).strip()
+        return venue
+    return summary
+
+
 def _serpapi_item_to_paper(item: dict) -> PaperInfo:
     pub_info = item.get("publication_info", {})
     if not isinstance(pub_info, dict):
@@ -92,8 +109,12 @@ def _serpapi_item_to_paper(item: dict) -> PaperInfo:
 
     # Use only the direct link — result_id is a Scholar-internal ID, not a paper URL
     link = item.get("link")
-    # If link looks like a Google redirect or Scholar internal page, discard it
-    if link and ("google.com/scholar" in link or "scholar.google" in link):
+    # Discard unstable or indirect URLs
+    if link and (
+        "google.com/scholar" in link
+        or "scholar.google" in link
+        or "academia.edu/download/" in link   # numeric download IDs get reassigned
+    ):
         link = None
 
     # Try to extract DOI from resources
@@ -109,9 +130,9 @@ def _serpapi_item_to_paper(item: dict) -> PaperInfo:
         "title": item.get("title", "Unknown Title"),
         "authors": _parse_authors_serpapi(pub_info),
         "year": _extract_year(summary),
-        "url": link or doi_url,
+        "url": doi_url or link,
         "abstract": item.get("snippet", ""),
-        "venue": summary,
+        "venue": _parse_venue_from_summary(summary),
         "prisma_stage": "identified",
         "decision": None,
         "reason": None,
