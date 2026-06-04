@@ -42,9 +42,8 @@ Thumbs.db
 # Build cache
 *.tsbuildinfo
 
-# Local dev / auto-generated docs
+# Auto-generated docs (Claude Code internal)
 CLAUDE.md
-DEVELOPMENT.md
 
 # Adhoc test files
 query.sql
