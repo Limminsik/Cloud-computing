@@ -26,7 +26,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:password@db:5432/research
       AI_SERVICE_URL: http://ai-service:8000
-      FRONTEND_URL: http://localhost:3000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       PORT: 4000
     depends_on:
       db:
@@ -56,8 +56,8 @@ services:
       dockerfile: Dockerfile
       args:
         # These are build-time: the browser accesses services via localhost
-        NEXT_PUBLIC_NESTJS_URL: http://localhost:4000
-        NEXT_PUBLIC_AI_SERVICE_URL: http://localhost:8000
+        NEXT_PUBLIC_NESTJS_URL: ${NEXT_PUBLIC_NESTJS_URL:-http://localhost:4000}
+        NEXT_PUBLIC_AI_SERVICE_URL: ${NEXT_PUBLIC_AI_SERVICE_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
     depends_on:
